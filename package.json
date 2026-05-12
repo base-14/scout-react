@@ -36,18 +36,8 @@
   ],
   "scripts": {
     "build": "tsup && tsc -p tsconfig.native.json",
-    "build:web": "tsup",
-    "build:native": "tsc -p tsconfig.native.json",
-    "build:types": "tsc --emitDeclarationOnly --outDir dist",
-    "clean": "rm -rf dist coverage",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "fmt": "prettier --write src",
-    "fmt:check": "prettier --check src",
-    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "prepare": "npm run build"
   },
   "keywords": [
     "opentelemetry",
@@ -80,10 +70,10 @@
     "web-vitals": "^5.2.0"
   },
   "peerDependencies": {
-    "@react-native-async-storage/async-storage": "*",
-    "@react-navigation/native": "*",
     "react": ">=17.0.0",
-    "react-native": "*"
+    "react-native": "*",
+    "@react-native-async-storage/async-storage": "*",
+    "@react-navigation/native": "*"
   },
   "peerDependenciesMeta": {
     "react": {

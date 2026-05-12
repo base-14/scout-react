@@ -1,4 +1,4 @@
-.PHONY: help install build typecheck test test-coverage lint lint-fix \
+.PHONY: help install build typecheck test test-watch test-coverage lint lint-fix \
         fmt fmt-check clean audit ci all
 
 NODE_BIN := node_modules/.bin
@@ -18,6 +18,9 @@ typecheck: ## TypeScript check without emit
 
 test: ## Run unit tests
 	$(NODE_BIN)/vitest run
+
+test-watch: ## Run unit tests in watch mode
+	$(NODE_BIN)/vitest
 
 test-coverage: ## Run unit tests with coverage report
 	$(NODE_BIN)/vitest run --coverage

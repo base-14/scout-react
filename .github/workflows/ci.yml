@@ -29,20 +29,8 @@ jobs:
       - name: install
         run: npm ci --no-fund --no-audit
 
-      - name: format check
-        run: npm run fmt:check
-
-      - name: lint
-        run: npm run lint
-
-      - name: typecheck
-        run: npm run typecheck
-
-      - name: test
-        run: npm run test:coverage
-
-      - name: build
-        run: npm run build
+      - name: ci
+        run: make ci
 
       - name: audit (production deps only)
         run: npm audit --omit=dev --audit-level=high
