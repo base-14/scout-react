@@ -16,6 +16,7 @@ const peers = [
     '@react-native-async-storage/async-storage',
     '@react-native-community/netinfo',
     'react-native-device-info',
+    'expo-battery',
     '@react-navigation/native',
     '@react-navigation/bottom-tabs',
     '@react-navigation/native-stack',

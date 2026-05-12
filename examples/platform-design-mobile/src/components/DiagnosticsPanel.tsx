@@ -26,6 +26,14 @@ export function DiagnosticsPanel() {
             while (Date.now() < end) {
             }
         }}/>
+        <Btn label="anr (6s freeze)" variant="danger" onPress={() => {
+            const end = Date.now() + 6000;
+            while (Date.now() < end) {
+            }
+        }}/>
+        <Btn label="render error" variant="danger" onPress={() => {
+            (undefined as any).neverPropertyAccess.crash();
+        }}/>
         <Btn label="fatal (red box)" variant="danger" onPress={() => {
             const g: any = globalThis;
             const err = new Error('synthetic fatal crash');
@@ -33,6 +41,18 @@ export function DiagnosticsPanel() {
                 g.ErrorUtils.reportFatalError(err);
             else
                 throw err;
+        }}/>
+        <Btn label="complete app crash" variant="danger" onPress={() => {
+            const g: any = globalThis;
+            const err = new Error('intentional complete crash — verify app_crash on next launch');
+            if (g.ErrorUtils?.reportFatalError) {
+                g.ErrorUtils.reportFatalError(err);
+            }
+            setTimeout(() => {
+                while (true) {
+                    throw err;
+                }
+            }, 100);
         }}/>
       </View>
     </View>);

@@ -1,13 +1,28 @@
 node_modules/
 dist/
-.DS_Store
-*.log
 coverage/
+*.tsbuildinfo
+*.log
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
 .idea/
 .vscode/
-*.tsbuildinfo
 
 # Local dev tooling — collector config, logs, secrets, pids
 dev/
 .env
 .env.local
+
+# Expo / RN generated artifacts in example apps.
+# `expo prebuild` regenerates these from app.json + dependencies, so we
+# don't commit them. Pin them in CI by checking in the lockfile only.
+examples/*/ios/
+examples/*/android/
+examples/*/.expo/
+examples/*/.eas/
+examples/*/web-build/
+examples/*/dist/

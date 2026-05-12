@@ -18,9 +18,7 @@ function SongsStack() {
       <SongsStackNav.Screen name="SongDetail" component={SongDetailScreen}/>
     </SongsStackNav.Navigator>);
 }
-const ENDPOINT = Platform.OS === 'android'
-    ? 'http://localhost:34318'
-    : 'http://localhost:34318';
+const ENDPOINT = 'http://localhost:34318';
 export default function App() {
     const navRef = useNavigationContainerRef();
     const [ready, setReady] = useState(false);
@@ -40,6 +38,16 @@ export default function App() {
                 firstPartyHosts: ['localhost', '127.0.0.1'],
                 metricExportIntervalMs: 2000,
                 logExportScheduledDelayMs: 1000,
+                resourceAttributes: {
+                    'deployment.region': 'us-east-1',
+                    team: 'mobile',
+                },
+                beforeSend: (event) => {
+                    if (String(event['http.url'] ?? '').includes('/health'))
+                        return null;
+                    delete event['enduser.email'];
+                    return event;
+                },
             });
             Scout.setUser('nimish-test-01', {
                 email: 'nimish@base14.io',

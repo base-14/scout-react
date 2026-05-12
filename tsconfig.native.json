@@ -4,6 +4,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "lib": ["ES2020"],
+    "jsx": "react",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

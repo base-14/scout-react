@@ -142,6 +142,7 @@ export class Scout {
     reportError(error: unknown, opts?: {
         handled?: boolean;
         library?: string;
+        componentStack?: string;
     }): void {
         const handled = opts?.handled ?? true;
         const { message, stack } = normalizeError(error);
@@ -155,6 +156,8 @@ export class Scout {
         };
         if (opts?.library)
             attrs[ATTR.ERROR_LIBRARY] = opts.library;
+        if (opts?.componentStack)
+            attrs[ATTR.ERROR_COMPONENT_STACK] = opts.componentStack;
         this.emitSpan(SPAN.ERROR, attrs, { status: SpanStatusCode.ERROR });
         this.errorCounter?.add(1, { handled: String(handled) });
         this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, message);

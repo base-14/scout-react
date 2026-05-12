@@ -10,14 +10,8 @@ interface NavigationRef {
 export function installNativeNavigationTracker(scout: Scout, navigationRef: NavigationRef): () => void {
     let currentScreen = navigationRef.getCurrentRoute?.()?.name ?? 'unknown';
     let enterAt = Date.now();
-    const emit = (name: string) => {
-        scout.emitSpan(SPAN.SCREEN_VIEW, {
-            [ATTR.SCREEN_NAME]: name,
-            ...scout.commonAttributes(),
-        });
-        scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${name}`);
-    };
-    emit(currentScreen);
+    scout.startRootSpan(SPAN.SCREEN_VIEW, { [ATTR.SCREEN_NAME]: currentScreen });
+    scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${currentScreen}`);
     if (!navigationRef.addListener)
         return () => { };
     const unsub = navigationRef.addListener('state', () => {
@@ -30,9 +24,11 @@ export function installNativeNavigationTracker(scout: Scout, navigationRef: Navi
             [ATTR.VIEW_TIME_SPENT]: elapsed,
             ...scout.commonAttributes(),
         });
+        scout.addBreadcrumb(BREADCRUMB_TYPE.VIEW_SESSION, `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`);
         currentScreen = next;
         enterAt = Date.now();
-        emit(next);
+        scout.startRootSpan(SPAN.SCREEN_VIEW, { [ATTR.SCREEN_NAME]: next });
+        scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
     });
     return () => unsub?.();
 }

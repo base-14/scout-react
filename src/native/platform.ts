@@ -25,6 +25,12 @@ try {
 }
 catch {
 }
+let ExpoBattery: any = null;
+try {
+    ExpoBattery = withSuppression(() => require('expo-battery'));
+}
+catch {
+}
 const memoryStore = new Map<string, string>();
 export class NativePlatform implements PlatformAdapter {
     readonly name = 'react-native' as const;
@@ -90,12 +96,24 @@ export class NativePlatform implements PlatformAdapter {
             catch {
             }
         }
+        try {
+            const battery = await readBattery();
+            if (battery.level != null)
+                attrs[ATTR.DEVICE_BATTERY_LEVEL] = battery.level;
+            if (battery.state)
+                attrs[ATTR.DEVICE_BATTERY_STATE] = battery.state;
+        }
+        catch {
+        }
         return attrs;
     }
     getConnectionType(): string {
         return this.connectionType;
     }
     onConnectivityChange(handler: (type: string) => void): () => void {
+        return this._onConnectivityChange(handler);
+    }
+    private _onConnectivityChange(handler: (type: string) => void): () => void {
         if (!NetInfo)
             return () => { };
         try {
@@ -115,5 +133,49 @@ export class NativePlatform implements PlatformAdapter {
         catch {
             return () => { };
         }
+    }
+}
+async function readBattery(): Promise<{
+    level: number | null;
+    state: string | null;
+}> {
+    if (ExpoBattery) {
+        try {
+            const [rawLevel, rawState] = await Promise.all([
+                ExpoBattery.getBatteryLevelAsync(),
+                ExpoBattery.getBatteryStateAsync(),
+            ]);
+            const level = typeof rawLevel === 'number' && rawLevel >= 0 ? Math.round(rawLevel * 100) : null;
+            const state = mapExpoBatteryState(rawState);
+            return { level, state };
+        }
+        catch {
+        }
+    }
+    if (DeviceInfo) {
+        try {
+            const [rawLevel, charging] = await Promise.all([
+                DeviceInfo.getBatteryLevel(),
+                DeviceInfo.isBatteryCharging(),
+            ]);
+            const level = typeof rawLevel === 'number' && rawLevel >= 0 ? Math.round(rawLevel * 100) : null;
+            return { level, state: charging ? 'charging' : 'discharging' };
+        }
+        catch {
+        }
+    }
+    return { level: null, state: null };
+}
+function mapExpoBatteryState(raw: unknown): string | null {
+    switch (raw) {
+        case 1:
+            return 'discharging';
+        case 2:
+            return 'charging';
+        case 3:
+            return 'full';
+        case 0:
+        default:
+            return 'unknown';
     }
 }

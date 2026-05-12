@@ -11,18 +11,23 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, } from '@opentelemetry/semanti
 import { Scout as ScoutCore } from '../core/scout';
 import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
 import type { Attributes } from '../core/types';
+import { ATTR } from '../core/attributes';
+import { SPAN } from '../core/spans';
 import { NativePlatform } from './platform';
 import { installNativeRejectionTracker } from './instrumentations/error';
 import { installNativeLifecycleTracker } from './instrumentations/lifecycle';
 import { installNativeNetworkTracker } from './instrumentations/network';
 import { installNativeNavigationTracker } from './instrumentations/navigation';
-import { installNativeTapTracker } from './instrumentations/tap';
 import { installNativeCrashDetector } from './instrumentations/crash';
-import { isSuppressingSdkErrors } from './soft-load';
+import { installNativeAnrDetector } from './instrumentations/anr';
+import { ScoutRootBoundary } from './error-boundary';
+import { withSuppression, isSuppressingSdkErrors } from './soft-load';
 export { ATTR } from '../core/attributes';
 export { SPAN, BREADCRUMB_TYPE } from '../core/spans';
 export { METRIC } from '../core/metrics';
 export { ScoutCore };
+export { ScoutTouchBoundary } from './touch-boundary';
+export { ScoutErrorBoundary, ScoutRootBoundary } from './error-boundary';
 export type { Attributes, AttributeValue, BeforeSendCallback, BeforeSendEvent, Breadcrumb, SeverityText, } from '../core/types';
 export type { ScoutConfig } from '../core/config';
 let _instance: ScoutCore | null = null;
@@ -122,9 +127,12 @@ export const Scout = {
             _disposers.push(installNativeLifecycleTracker(core));
         if (resolved.enableNetworkTracking)
             _disposers.push(installNativeNetworkTracker(core));
-        if (resolved.enableAutoTapTracking)
-            _disposers.push(installNativeTapTracker(core));
+        if (resolved.enableAnrDetection)
+            _disposers.push(installNativeAnrDetector(core, resolved.anrThresholdMs));
         _disposers.push(await installNativeCrashDetector(core));
+        core.startRootSpan(SPAN.APP_STARTUP, {
+            [ATTR.APP_STARTUP_TYPE]: 'session',
+        });
         if (installedEarlyHandler) {
             _disposers.push(() => {
                 try {
@@ -141,6 +149,30 @@ export const Scout = {
         const dispose = installNativeNavigationTracker(_instance, navigationRef);
         _disposers.push(dispose);
         return dispose;
+    },
+    registerRootComponent(component: any): void {
+        const RN = withSuppression(() => require('react-native'));
+        const AppRegistry = RN?.AppRegistry;
+        if (AppRegistry?.setWrapperComponentProvider) {
+            try {
+                AppRegistry.setWrapperComponentProvider(() => ScoutRootBoundary);
+            }
+            catch {
+            }
+        }
+        const expoRegister = withSuppression(() => {
+            try {
+                return require('expo').registerRootComponent;
+            }
+            catch {
+                return null;
+            }
+        });
+        if (typeof expoRegister === 'function') {
+            expoRegister(component);
+            return;
+        }
+        AppRegistry?.registerComponent?.('main', () => component);
     },
     get isInitialized(): boolean {
         return _instance !== null;

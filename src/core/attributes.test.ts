@@ -3,7 +3,7 @@ import { ATTR } from './attributes';
 import { SPAN, BREADCRUMB_TYPE } from './spans';
 import { METRIC } from './metrics';
 describe('attribute / span / metric name contract', () => {
-    it('keeps semantic attribute keys parity with scout_flutter', () => {
+    it('keeps semantic attribute keys stable', () => {
         expect(ATTR.SESSION_ID).toBe('session.id');
         expect(ATTR.ENDUSER_ID).toBe('enduser.id');
         expect(ATTR.SCREEN_NAME).toBe('screen.name');
@@ -26,7 +26,7 @@ describe('attribute / span / metric name contract', () => {
         expect(ATTR.DEVICE_BATTERY_STATE).toBe('device.battery.state');
         expect(ATTR.NETWORK_CONNECTION_TYPE).toBe('network.connection.type');
     });
-    it('keeps span names parity with scout_flutter', () => {
+    it('keeps span names stable', () => {
         expect(SPAN.USER_INTERACTION).toBe('user_interaction');
         expect(SPAN.SCREEN_VIEW).toBe('screen_view');
         expect(SPAN.SCREEN_LOAD).toBe('screen_load');

@@ -14,6 +14,7 @@ export const ATTR = {
     ERROR_TYPE: 'error.type',
     ERROR_MESSAGE: 'error.message',
     ERROR_STACK_TRACE: 'error.stack_trace',
+    ERROR_COMPONENT_STACK: 'error.component_stack',
     ERROR_LIBRARY: 'error.library',
     ERROR_HANDLED: 'error.handled',
     BREADCRUMBS: 'breadcrumbs',

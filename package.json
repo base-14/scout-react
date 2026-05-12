@@ -35,7 +35,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc -p tsconfig.native.json",
+    "build:web": "tsup",
+    "build:native": "tsc -p tsconfig.native.json",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src",
