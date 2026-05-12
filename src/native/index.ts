@@ -20,6 +20,8 @@ import { installNativeNetworkTracker } from './instrumentations/network';
 import { installNativeNavigationTracker } from './instrumentations/navigation';
 import { installNativeCrashDetector } from './instrumentations/crash';
 import { installNativeAnrDetector } from './instrumentations/anr';
+import { installNativeMemoryTracker } from './instrumentations/memory';
+import { installNativeFrameMetricsTracker } from './instrumentations/frame-metrics';
 import { ScoutRootBoundary } from './error-boundary';
 import { withSuppression, isSuppressingSdkErrors } from './soft-load';
 export { ATTR } from '../core/attributes';
@@ -129,6 +131,10 @@ export const Scout = {
             _disposers.push(installNativeNetworkTracker(core));
         if (resolved.enableAnrDetection)
             _disposers.push(installNativeAnrDetector(core, resolved.anrThresholdMs));
+        if (resolved.enableMemoryMetrics)
+            _disposers.push(installNativeMemoryTracker(core));
+        if (resolved.enableFrameMetrics)
+            _disposers.push(installNativeFrameMetricsTracker(core, resolved.longTaskThresholdMs));
         _disposers.push(await installNativeCrashDetector(core));
         core.startRootSpan(SPAN.APP_STARTUP, {
             [ATTR.APP_STARTUP_TYPE]: 'session',

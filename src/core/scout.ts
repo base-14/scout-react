@@ -259,7 +259,9 @@ export class Scout {
             return;
         try {
             const histogram = this.meter.createHistogram(name);
-            histogram.record(value, toOtelAttrs(this.commonAttributes()));
+            const recordAttrs = { ...filtered.attributes };
+            delete recordAttrs.value;
+            histogram.record(value, toOtelAttrs(recordAttrs));
         }
         catch (e) {
             this.debug('emitHistogram failed', e);
@@ -277,7 +279,9 @@ export class Scout {
             return;
         try {
             const gauge = this.meter.createUpDownCounter(name);
-            gauge.add(value, toOtelAttrs(this.commonAttributes()));
+            const recordAttrs = { ...filtered.attributes };
+            delete recordAttrs.value;
+            gauge.add(value, toOtelAttrs(recordAttrs));
         }
         catch (e) {
             this.debug('emitGauge failed', e);
