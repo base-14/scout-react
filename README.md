@@ -1,8 +1,8 @@
-# @base14/scout-react
+# Scout React
 
-Zero-config OpenTelemetry RUM for **React (browser) and React Native**.
+Zero-config OpenTelemetry RUM (Real User Monitoring) for React (browser) and React Native. Install the package, call `Scout.initialize()` — that's it.
 
-Install once, call `Scout.initialize()`, get clicks / navigation / errors / lifecycle / network / web vitals / crashes / device context exported over OTLP/HTTP.
+Auto-captures clicks, navigation, errors, lifecycle, network, performance, web vitals, and device context. Exports over OTLP/HTTP.
 
 ```ts
 import Scout from '@base14/scout-react';
