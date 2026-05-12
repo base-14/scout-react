@@ -1,0 +1,15 @@
+export const METRIC = {
+    ERROR_COUNT: 'error.count',
+    WEB_MEMORY_USAGE: 'web.memory.usage',
+    WEB_CPU_USAGE: 'web.cpu.usage',
+    WEB_FRAME_TIME: 'web.frame.time',
+    WEB_VITAL_LCP: 'web.vital.lcp',
+    WEB_VITAL_FID: 'web.vital.fid',
+    WEB_VITAL_CLS: 'web.vital.cls',
+    WEB_VITAL_INP: 'web.vital.inp',
+    WEB_VITAL_TTFB: 'web.vital.ttfb',
+    WEB_VITAL_FCP: 'web.vital.fcp',
+    RN_MEMORY_USAGE: 'react_native.memory.usage',
+    RN_FRAME_BUILD_TIME: 'react_native.frame.build_time',
+    RN_FRAME_DROPPED: 'react_native.frame.dropped',
+} as const;

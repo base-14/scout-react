@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "platform-design-mobile",
+    "slug": "scout-platform-design",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "platformdesign",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.base14.platformdesign",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "localhost": { "NSExceptionAllowsInsecureHTTPLoads": true },
+            "127.0.0.1": { "NSExceptionAllowsInsecureHTTPLoads": true }
+          }
+        }
+      }
+    },
+    "android": {
+      "package": "io.base14.platformdesign",
+      "usesCleartextTraffic": true
+    },
+    "plugins": []
+  }
+}

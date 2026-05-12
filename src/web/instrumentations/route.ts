@@ -1,0 +1,68 @@
+import { ATTR } from '../../core/attributes';
+import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
+import type { Scout } from '../../core/scout';
+export function installRouteTracker(scout: Scout): () => void {
+    if (typeof window === 'undefined' || typeof history === 'undefined') {
+        return () => { };
+    }
+    let currentScreen = locationToScreen();
+    let enterTimeMs = performance.now();
+    startScreenSpan(currentScreen);
+    const handleChange = () => {
+        const next = locationToScreen();
+        if (next === currentScreen)
+            return;
+        const elapsed = (performance.now() - enterTimeMs) / 1000;
+        scout.emitSpan(SPAN.VIEW_SESSION, {
+            [ATTR.SCREEN_NAME]: currentScreen,
+            [ATTR.VIEW_TIME_SPENT]: elapsed,
+            ...scout.commonAttributes(),
+        });
+        scout.addBreadcrumb(BREADCRUMB_TYPE.VIEW_SESSION, `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`);
+        currentScreen = next;
+        enterTimeMs = performance.now();
+        startScreenSpan(currentScreen);
+    };
+    function startScreenSpan(name: string) {
+        const startedAt = performance.now();
+        scout.startRootSpan(SPAN.SCREEN_VIEW, {
+            [ATTR.SCREEN_NAME]: name,
+        });
+        scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${name}`);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const loadTime = (performance.now() - startedAt) / 1000;
+                scout.emitSpan(SPAN.SCREEN_LOAD, {
+                    [ATTR.SCREEN_NAME]: name,
+                    [ATTR.SCREEN_LOAD_TIME]: loadTime,
+                    ...scout.commonAttributes(),
+                });
+            });
+        });
+    }
+    const origPush = history.pushState.bind(history);
+    const origReplace = history.replaceState.bind(history);
+    history.pushState = function (...args: Parameters<typeof history.pushState>) {
+        const r = origPush(...args);
+        queueMicrotask(handleChange);
+        return r;
+    };
+    history.replaceState = function (...args: Parameters<typeof history.replaceState>) {
+        const r = origReplace(...args);
+        queueMicrotask(handleChange);
+        return r;
+    };
+    window.addEventListener('popstate', handleChange);
+    return () => {
+        history.pushState = origPush;
+        history.replaceState = origReplace;
+        window.removeEventListener('popstate', handleChange);
+        scout.setRootSpan(null);
+    };
+}
+function locationToScreen(): string {
+    if (typeof window === 'undefined')
+        return '/';
+    const { pathname, hash } = window.location;
+    return hash && hash.startsWith('#/') ? hash.slice(1) : pathname || '/';
+}

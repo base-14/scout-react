@@ -1,0 +1,129 @@
+{
+  "name": "@base14/scout-react",
+  "version": "0.1.0",
+  "description": "Zero-config OpenTelemetry RUM for React and React Native. Auto-captures clicks, navigation, errors, lifecycle, network, performance, and web vitals.",
+  "license": "MIT",
+  "author": "base-14",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/base-14/scout_react.git"
+  },
+  "type": "module",
+  "main": "./dist/web/index.cjs",
+  "module": "./dist/web/index.js",
+  "types": "./dist/web/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js",
+      "require": "./dist/web/index.cjs"
+    },
+    "./native": {
+      "types": "./dist/native/index.d.ts",
+      "default": "./dist/native/index.js"
+    },
+    "./react": {
+      "types": "./dist/web/react/index.d.ts",
+      "import": "./dist/web/react/index.js",
+      "require": "./dist/web/react/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "clean": "rm -rf dist coverage",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "fmt": "prettier --write src",
+    "fmt:check": "prettier --check src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "rum",
+    "real-user-monitoring",
+    "observability",
+    "react",
+    "react-native",
+    "tracing",
+    "metrics",
+    "logs",
+    "web-vitals",
+    "scout",
+    "base14"
+  ],
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.217.0",
+    "@opentelemetry/core": "^2.7.1",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.217.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.217.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.217.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-logs": "^0.217.0",
+    "@opentelemetry/sdk-metrics": "^2.7.1",
+    "@opentelemetry/sdk-trace-base": "^2.7.1",
+    "@opentelemetry/sdk-trace-web": "^2.7.1",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "web-vitals": "^5.2.0"
+  },
+  "peerDependencies": {
+    "@react-native-async-storage/async-storage": "*",
+    "@react-navigation/native": "*",
+    "react": ">=17.0.0",
+    "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "@react-native-async-storage/async-storage": {
+      "optional": true
+    },
+    "@react-navigation/native": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tsup": "^8.3.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.6"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "overrides": {
+    "protobufjs": "^8.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

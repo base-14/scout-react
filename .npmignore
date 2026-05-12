@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+.idea/
+.vscode/
+coverage/
+examples/
+tests/
+**/*.test.ts
+**/*.test.tsx
+tsconfig.json
+tsup.config.ts
+.eslintrc*
+.gitignore

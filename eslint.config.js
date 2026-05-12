@@ -1,0 +1,78 @@
+import js from '@eslint/js';
+import ts from '@typescript-eslint/eslint-plugin';
+import tsParser from '@typescript-eslint/parser';
+import prettier from 'eslint-config-prettier';
+export default [
+    {
+        ignores: [
+            'dist/**',
+            'node_modules/**',
+            'coverage/**',
+            'examples/**',
+            'dev/**',
+        ],
+    },
+    js.configs.recommended,
+    {
+        files: ['src/**/*.ts', 'src/**/*.tsx'],
+        languageOptions: {
+            parser: tsParser,
+            parserOptions: {
+                ecmaVersion: 2022,
+                sourceType: 'module',
+            },
+            globals: {
+                window: 'readonly',
+                document: 'readonly',
+                navigator: 'readonly',
+                location: 'readonly',
+                history: 'readonly',
+                localStorage: 'readonly',
+                performance: 'readonly',
+                PerformanceObserver: 'readonly',
+                XMLHttpRequest: 'readonly',
+                fetch: 'readonly',
+                Worker: 'readonly',
+                Blob: 'readonly',
+                URL: 'readonly',
+                Headers: 'readonly',
+                MessageEvent: 'readonly',
+                PageTransitionEvent: 'readonly',
+                ErrorEvent: 'readonly',
+                PromiseRejectionEvent: 'readonly',
+                PerformanceNavigationTiming: 'readonly',
+                HTMLElement: 'readonly',
+                Document: 'readonly',
+                Element: 'readonly',
+                XMLHttpRequestBodyInit: 'readonly',
+                RequestInfo: 'readonly',
+                RequestInit: 'readonly',
+                Request: 'readonly',
+                Response: 'readonly',
+                BodyInit: 'readonly',
+                globalThis: 'readonly',
+                console: 'readonly',
+                setTimeout: 'readonly',
+                clearTimeout: 'readonly',
+                setInterval: 'readonly',
+                clearInterval: 'readonly',
+                queueMicrotask: 'readonly',
+                requestAnimationFrame: 'readonly',
+                Uint8Array: 'readonly',
+            },
+        },
+        plugins: { '@typescript-eslint': ts },
+        rules: {
+            ...ts.configs.recommended.rules,
+            '@typescript-eslint/no-explicit-any': 'off',
+            '@typescript-eslint/no-require-imports': 'off',
+            '@typescript-eslint/no-unused-vars': [
+                'error',
+                { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+            ],
+            'no-empty': ['error', { allowEmptyCatch: true }],
+            'no-undef': 'off',
+        },
+    },
+    prettier,
+];
