@@ -38,6 +38,7 @@ export default function App() {
                 firstPartyHosts: ['localhost', '127.0.0.1'],
                 metricExportIntervalMs: 2000,
                 logExportScheduledDelayMs: 1000,
+                captureConsole: true,
                 resourceAttributes: {
                     'deployment.region': 'us-east-1',
                     team: 'mobile',

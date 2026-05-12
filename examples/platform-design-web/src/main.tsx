@@ -14,6 +14,7 @@ await Scout.initialize({
     firstPartyHosts: ['127.0.0.1', 'localhost'],
     metricExportIntervalMs: 2000,
     logExportScheduledDelayMs: 1000,
+    captureConsole: true,
 });
 Scout.setUser('nimish-test-01', {
     email: 'nimish@base14.io',
