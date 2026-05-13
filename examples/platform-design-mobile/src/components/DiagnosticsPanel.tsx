@@ -42,6 +42,17 @@ export function DiagnosticsPanel() {
             else
                 throw err;
         }}/>
+        <Btn label="native NSException" variant="danger" onPress={() => {
+            try {
+                const ExpoModules = require('expo-modules-core');
+                const ScoutCrash = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash');
+                if (ScoutCrash?.crashNow) {
+                    void ScoutCrash.crashNow('triggered from diagnostics panel');
+                }
+            }
+            catch {
+            }
+        }}/>
         <Btn label="complete app crash" variant="danger" onPress={() => {
             const g: any = globalThis;
             const err = new Error('intentional complete crash — verify app_crash on next launch');

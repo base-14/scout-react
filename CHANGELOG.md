@@ -17,6 +17,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`react_native.frame.dropped`** (gauge, count) on RN — emitted every
   10 seconds with the count of frames exceeding the 60Hz vsync budget
   (~32 ms) since the last report.
+- **`long_task`** + **`frozen_frame`** spans on RN — derived from the
+  same rAF loop. Threshold from `longTaskThresholdMs` (default 100 ms);
+  frames ≥ 700 ms additionally emit `frozen_frame`. Matches the web shape.
+- **`captureConsole`** instrumentation wired on RN — calls to
+  `console.debug/log/info/warn/error` become OTLP log records with the
+  appropriate severity. Already shipped on web.
+- **`native_crash`** capture on iOS — `NSSetUncaughtExceptionHandler`
+  catches uncaught `NSException`s on any thread. Reports persist to
+  `caches/scout-crash/pending/`; next launch emits a `native_crash` span
+  carrying `crash.type`, `crash.reason`, `crash.nsexception_name`,
+  `crash.stack_trace` (from `callStackSymbols`), `crash.thread`, and the
+  prior session's breadcrumbs.
+- **`native_crash`** capture on Android — uncaught Java/Kotlin
+  exceptions via `Thread.setDefaultUncaughtExceptionHandler`. Same
+  on-disk persistence + on-launch span shape as iOS.
+- New **Expo Module** (`ScoutCrash`) bundled inside the package
+  (`ios/ScoutCrashModule.swift` + `android/.../ScoutCrashModule.kt` +
+  `expo-module.config.json`). Auto-links via `expo install`. Requires a
+  development build (`npx expo prebuild && expo run:ios|android`) — not
+  available on Expo Go.
+
+### Fixed
+
+- `beforeSend` now actually applies its returned attributes to metric
+  emissions (`emitGauge`, `emitHistogram`). Previously the filtered
+  attributes were computed and discarded — PII scrubbing worked on spans
+  and logs but leaked into metrics.
+
+### Known limitations
+
+- **iOS signal-based crashes (SIGSEGV/SIGABRT/SIGBUS/etc.) and mach
+  exceptions** are not yet captured will integrate KSCrash
+  (2.5+) for the full coverage. The persisted-report shape is already
+  compatible.
+- **Android native signal crashes (NDK code)** are not yet captured.
+  will add a C signal handler with libunwind, writing into the
+  same directory.
 
 Now both web and RN emit memory and frame metrics under platform-prefixed
 names (`web.*` / `react_native.*`) so a single dashboard can filter by

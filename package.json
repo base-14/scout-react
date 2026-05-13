@@ -31,6 +31,9 @@
   "files": [
     "dist",
     "src",
+    "ios",
+    "android",
+    "expo-module.config.json",
     "README.md",
     "LICENSE"
   ],
