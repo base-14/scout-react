@@ -11,7 +11,7 @@ import { SEVERITY_NUMBER } from './logger';
 import { resolveConfig, type ResolvedConfig, type ScoutConfig } from './config';
 import type { PlatformAdapter } from './platform';
 import type { Attributes, AttributeValue, SeverityText } from './types';
-const TRACER_NAME = '@base14/scout-react';
+import { SCOPE_NAME, SCOPE_VERSION } from './scope';
 export class Scout {
     private _config: ResolvedConfig;
     private platform: PlatformAdapter;
@@ -28,9 +28,9 @@ export class Scout {
     constructor(config: ScoutConfig, platform: PlatformAdapter) {
         this._config = resolveConfig(config);
         this.platform = platform;
-        this.tracer = trace.getTracer(TRACER_NAME, '0.1.0');
-        this.meter = metrics.getMeter(TRACER_NAME, '0.1.0');
-        this.otelLogger = logs.getLogger(TRACER_NAME, '0.1.0');
+        this.tracer = trace.getTracer(SCOPE_NAME, SCOPE_VERSION);
+        this.meter = metrics.getMeter(SCOPE_NAME, SCOPE_VERSION);
+        this.otelLogger = logs.getLogger(SCOPE_NAME, SCOPE_VERSION);
         this.session = new SessionManager(platform, {
             timeoutMinutes: this._config.sessionTimeoutMinutes,
             sampleRate: this._config.sessionSampleRate,

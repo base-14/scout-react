@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1] - 2026-05-13
 
+### Changed
+
+- **InstrumentationScope name is now `base14.scout.react`** (was
+  `@base14/scout-react`). Every span, metric, and log emitted by the SDK
+  carries this scope, enforced by a CI guard test that fails the build if
+  any code path mints a different scope name. Backend queries filtering on
+  `scope.name` must be updated.
+
 ### Added
 
 - **`react_native.memory.usage`** (gauge, bytes) on RN — polls
