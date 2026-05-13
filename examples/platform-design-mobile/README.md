@@ -20,7 +20,7 @@ The simulator shares the host network, so `http://localhost:34318` reaches the
 collector directly.
 
 ```bash
-# from scout_react/
+# from scout-react/
 make collector
 make mobile-ios
 ```

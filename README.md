@@ -24,7 +24,7 @@ That's all the code you write.
 npm install @base14/scout-react
 
 # from git
-npm install github:base-14/scout_react#v0.1.0
+npm install github:base-14/scout-react#v0.1.1
 ```
 
 Peer deps are installed by the host app on demand (none of them are required for the web entry):
@@ -133,7 +133,8 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | ANR | `anr` | Web: worker watchdog. RN: timer-drift watchdog. |
 | HTTP (fetch + XHR) | `http.request` | Method, URL, status, duration, content-length |
 | Crash (OOM / force-kill) | `app_crash` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN) — survives unclean termination |
-| Logs | OTLP logs | `Scout.logDebug/Info/Warning/Error` |
+| Native crash (RN) | `native_crash` on next launch | iOS NSException via `NSSetUncaughtExceptionHandler`; Android Java/Kotlin via `Thread.setDefaultUncaughtExceptionHandler`. Report persisted to disk by the bundled `ScoutCrash` Expo module, emitted as a span on next launch with `crash.type`, `crash.reason`, `crash.stack_trace`, `crash.thread`, and the prior session's breadcrumbs |
+| Logs | OTLP logs | `Scout.logDebug/Info/Warning/Error` and (opt-in) `console.*` capture |
 
 ### Web only
 
@@ -153,6 +154,10 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | Device | model, manufacturer, brand, is_physical, screen dimensions via `react-native-device-info` + `RN.Dimensions` |
 | Network connectivity type | via `@react-native-community/netinfo` |
 | OS name / version | via `Platform.OS`, `Platform.Version` |
+| Memory | `react_native.memory.usage` gauge — polls `react-native-device-info.getUsedMemory()` every 10s |
+| Frame metrics | `react_native.frame.build_time` histogram + `react_native.frame.dropped` gauge sampled via `requestAnimationFrame` |
+| Long tasks / frozen frames | `long_task` and `frozen_frame` spans derived from the same rAF loop (≥ `longTaskThresholdMs`, ≥ 700ms respectively) |
+| Console capture | Opt-in via `captureConsole: true` |
 
 ### Resource attributes (shared across all signals)
 
@@ -164,6 +169,20 @@ Attached to every `ResourceSpans` / `ResourceMetrics` / `ResourceLogs` batch:
 - `screen.width`, `screen.height`, `screen.pixel_ratio`
 - `device.battery.level`, `device.battery.state`
 - Anything you pass via `config.resourceAttributes` (e.g. `deployment.region`, `team`)
+
+### InstrumentationScope
+
+Every span, metric, and log emitted by this SDK carries a single
+OpenTelemetry InstrumentationScope:
+
+```
+name:    base14.scout.react
+version: <package.json version>
+```
+
+This is enforced by a CI guard test — backends can filter on `scope.name`
+to identify all Scout-originated telemetry regardless of which signal or
+which auto-instrumentation produced it.
 
 ---
 
@@ -239,8 +258,8 @@ await Scout.initialize({
   enablePerformanceMetrics: true,
   enableLongTaskDetection: true,
   enableAnrDetection: true,
-  enableFrameMetrics: true,                  // web
-  enableMemoryMetrics: true,                 // web
+  enableFrameMetrics: true,                  // web + RN
+  enableMemoryMetrics: true,                 // web + RN
   enableWebVitals: true,                     // web
   enableBatteryTracking: true,
   enableNetworkTracking: true,
@@ -283,11 +302,12 @@ await Scout.initialize({
 
 ---
 
-## Out of scope
+## Out of scope (for now)
 
 | Signal | Why not |
 |---|---|
-| Native signal crashes (SIGSEGV / NSException / JVM exceptions) | Require a native crash module (KSCrash / Crashpad / NDK signal handlers). Out of scope for an OTLP-only JS SDK. JS-fatal errors still flow through `ErrorUtils` and are captured as `error` spans with `handled=false`. |
+| iOS signal-based crashes (SIGSEGV / SIGABRT / mach exceptions) | Requires KSCrash or Crashpad integration. NSException-style crashes ARE captured today via `NSSetUncaughtExceptionHandler`. Signal coverage is planned. |
+| Android native (NDK) crashes | Requires a C signal handler with libunwind. Uncaught Java/Kotlin exceptions ARE captured today via `Thread.setDefaultUncaughtExceptionHandler`. |
 | Frame raster time (web) | Browsers expose only whole-frame durations via Long Animation Frame. We emit `web.frame.build_time` covering the full frame. |
 | CPU usage (web) | No browser API. |
 
@@ -297,10 +317,10 @@ await Scout.initialize({
 
 | Sample | Stack | How to run |
 |---|---|---|
-| [`examples/platform-design-web`](examples/platform-design-web/) | Vite + React | `make demo` — http://localhost:5174 |
-| [`examples/platform-design-mobile`](examples/platform-design-mobile/) | Expo + React Native | `npx expo run:ios` or `npx expo run:android` |
+| [`examples/platform-design-web`](examples/platform-design-web/) | Vite + React | `cd examples/platform-design-web && npm run dev` |
+| [`examples/platform-design-mobile`](examples/platform-design-mobile/) | Expo + React Native | `cd examples/platform-design-mobile && npx expo run:ios` (or `run:android`). The mobile example bundles the `ScoutCrash` Expo module — `npx expo prebuild` is run automatically the first time. |
 
-Both point at the same local OTel collector (`make collector` brings one up on `:34318`).
+Both default to the local OTel collector on `:34318`. The repo includes a sample collector config in `dev/` (gitignored) — point your collector at it or use your own.
 
 ---
 
@@ -312,7 +332,7 @@ make build              # tsup for web entries, tsc for native (preserves litera
 make typecheck
 make lint
 make fmt                # prettier --write
-make test               # 88 unit + jsdom integration tests
+make test               # 90 unit + jsdom integration tests
 make test-coverage      # core/** ≥ 75% lines, ≥ 70% functions
 make audit              # npm audit prod + all
 make ci                 # fmt-check → lint → typecheck → test → build

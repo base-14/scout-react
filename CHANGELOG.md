@@ -133,4 +133,4 @@ Initial release.
   require a native crash module. JS-fatal errors still flow through
   `ErrorUtils` → `error.handled=false`.
 
-[0.1.0]: https://github.com/base-14/scout_react/releases/tag/v0.1.0
+[0.1.0]: https://github.com/base-14/scout-react/releases/tag/v0.1.0

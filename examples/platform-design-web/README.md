@@ -6,7 +6,7 @@ signal type and verify it lands in a local OpenTelemetry collector.
 
 ## Run
 
-From the package root (`scout_react/`):
+From the package root (`scout-react/`):
 
 ```bash
 make demo            # start collector + this app on http://127.0.0.1:5174
