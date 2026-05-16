@@ -115,7 +115,7 @@
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "overrides": {
     "protobufjs": "^8.2.0"
