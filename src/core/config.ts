@@ -33,11 +33,27 @@ export interface ScoutConfig {
     ignoreUrlPatterns?: RegExp[];
     maxOfflineStorageMb?: number;
     beforeSend?: BeforeSendCallback;
+    traceExportIntervalMs?: number;
+    traceMaxQueueSize?: number;
+    traceMaxExportBatchSize?: number;
     metricExportIntervalMs?: number;
     logExportScheduledDelayMs?: number;
+    logMaxQueueSize?: number;
+    logMaxExportBatchSize?: number;
+    exportTimeoutMs?: number;
+    exportRetry?: {
+        maxRetries?: number;
+        initialDelayMs?: number;
+        maxDelayMs?: number;
+    };
     debug?: boolean;
 }
-export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend' | 'applicationId' | 'buildId'>> {
+export interface ResolvedRetry {
+    maxRetries: number;
+    initialDelayMs: number;
+    maxDelayMs: number;
+}
+export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend' | 'applicationId' | 'buildId' | 'exportRetry'>> {
     environment?: string;
     headers?: Record<string, string>;
     resourceAttributes?: Attributes;
@@ -46,6 +62,7 @@ export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment'
     beforeSend?: BeforeSendCallback;
     applicationId?: string;
     buildId?: string;
+    exportRetry: ResolvedRetry;
 }
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
@@ -86,8 +103,19 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
         ignoreUrlPatterns: config.ignoreUrlPatterns,
         maxOfflineStorageMb: config.maxOfflineStorageMb ?? 5,
         beforeSend: config.beforeSend,
+        traceExportIntervalMs: config.traceExportIntervalMs ?? 5000,
+        traceMaxQueueSize: config.traceMaxQueueSize ?? 2048,
+        traceMaxExportBatchSize: config.traceMaxExportBatchSize ?? 512,
         metricExportIntervalMs: config.metricExportIntervalMs ?? 30000,
         logExportScheduledDelayMs: config.logExportScheduledDelayMs ?? 5000,
+        logMaxQueueSize: config.logMaxQueueSize ?? 2048,
+        logMaxExportBatchSize: config.logMaxExportBatchSize ?? 512,
+        exportTimeoutMs: config.exportTimeoutMs ?? 30000,
+        exportRetry: {
+            maxRetries: Math.max(0, config.exportRetry?.maxRetries ?? 3),
+            initialDelayMs: Math.max(100, config.exportRetry?.initialDelayMs ?? 1000),
+            maxDelayMs: Math.max(1000, config.exportRetry?.maxDelayMs ?? 30000),
+        },
         debug: config.debug ?? false,
     };
 }

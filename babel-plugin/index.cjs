@@ -51,7 +51,7 @@ module.exports = function scoutBabelPlugin(babel) {
                 ? t.stringLiteral(descriptor.children)
                 : t.identifier('undefined')),
         ]);
-        const tapCall = t.expressionStatement(t.callExpression(t.optionalMemberExpression(t.memberExpression(t.identifier('globalThis'), t.identifier('__scoutTap')), t.identifier('call'), false, true), [t.identifier('undefined'), descriptorObj, argsId]));
+        const tapCall = t.ifStatement(t.binaryExpression('===', t.unaryExpression('typeof', t.memberExpression(t.identifier('globalThis'), t.identifier('__scoutTap'))), t.stringLiteral('function')), t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('globalThis'), t.identifier('__scoutTap')), [descriptorObj, argsId])));
         const originalCall = t.returnStatement(t.logicalExpression('&&', originalExpr, t.callExpression(t.memberExpression(originalExpr, t.identifier('apply')), [
             t.thisExpression(),
             argsId,

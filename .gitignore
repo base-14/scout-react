@@ -45,5 +45,3 @@ ios/Pods/
 ios/*.xcworkspace/
 *.xcuserdata/
 
-# Internal reference docs / vendor mapping — keep local, never commit.
-docs/

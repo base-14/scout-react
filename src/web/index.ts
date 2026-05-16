@@ -10,6 +10,7 @@ import { logs } from '@opentelemetry/api-logs';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, } from '@opentelemetry/semantic-conventions';
 import { Scout as ScoutCore } from '../core/scout';
 import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
+import { wrapWithRetry } from '../core/retry-exporter';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { WebPlatform } from './platform';
@@ -61,28 +62,54 @@ export const Scout = {
             ...((resolved.resourceAttributes as Record<string, any>) ?? {}),
         });
         const headers = resolved.headers ?? {};
+        const traceExporter = wrapWithRetry(new OTLPTraceExporter({
+            url: `${endpoint}/v1/traces`,
+            headers,
+            timeoutMillis: resolved.exportTimeoutMs,
+        }), resolved.exportRetry);
         const traceProvider = new WebTracerProvider({
             resource,
             spanProcessors: [
-                new BatchSpanProcessor(new OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers })),
+                new BatchSpanProcessor(traceExporter, {
+                    scheduledDelayMillis: resolved.traceExportIntervalMs,
+                    maxQueueSize: resolved.traceMaxQueueSize,
+                    maxExportBatchSize: resolved.traceMaxExportBatchSize,
+                    exportTimeoutMillis: resolved.exportTimeoutMs,
+                }),
             ],
         });
         traceProvider.register();
         trace.setGlobalTracerProvider(traceProvider);
+        const metricExporter = wrapWithRetry(new OTLPMetricExporter({
+            url: `${endpoint}/v1/metrics`,
+            headers,
+            timeoutMillis: resolved.exportTimeoutMs,
+        }), resolved.exportRetry);
         const meterProvider = new MeterProvider({
             resource,
             readers: [
                 new PeriodicExportingMetricReader({
-                    exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics`, headers }),
+                    exporter: metricExporter,
                     exportIntervalMillis: resolved.metricExportIntervalMs,
+                    exportTimeoutMillis: Math.min(resolved.exportTimeoutMs, resolved.metricExportIntervalMs),
                 }),
             ],
         });
         metrics.setGlobalMeterProvider(meterProvider);
+        const logExporter = wrapWithRetry(new OTLPLogExporter({
+            url: `${endpoint}/v1/logs`,
+            headers,
+            timeoutMillis: resolved.exportTimeoutMs,
+        }), resolved.exportRetry);
         const loggerProvider = new LoggerProvider({
             resource,
             processors: [
-                new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers }), { scheduledDelayMillis: resolved.logExportScheduledDelayMs }),
+                new BatchLogRecordProcessor(logExporter, {
+                    scheduledDelayMillis: resolved.logExportScheduledDelayMs,
+                    maxQueueSize: resolved.logMaxQueueSize,
+                    maxExportBatchSize: resolved.logMaxExportBatchSize,
+                    exportTimeoutMillis: resolved.exportTimeoutMs,
+                }),
             ],
         });
         logs.setGlobalLoggerProvider(loggerProvider);

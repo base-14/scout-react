@@ -15,6 +15,11 @@ export function installNativeLifecycleTracker(scout: Scout): () => void {
     const onChange = (state: string) => {
         try {
             if (last === 'active' && (state === 'background' || state === 'inactive')) {
+                try {
+                    scout.setRootSpan(null);
+                }
+                catch {
+                }
                 scout.emitSpan(SPAN.APP_PAUSED, scout.commonAttributes());
                 scout.addBreadcrumb(BREADCRUMB_TYPE.LIFECYCLE, 'paused');
             }

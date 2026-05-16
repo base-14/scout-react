@@ -2,6 +2,13 @@ import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { uuidv4 } from '../../core/uuid';
+import { withSuppression } from '../soft-load';
+let RN: any = null;
+try {
+    RN = withSuppression(() => require('react-native'));
+}
+catch {
+}
 interface NavigationRef {
     getCurrentRoute?: () => {
         name?: string;
@@ -34,7 +41,33 @@ export function installNativeNavigationTracker(scout: Scout, navigationRef: Navi
         startScreen(next);
         scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
     });
-    return () => unsub?.();
+    let appStateSub: {
+        remove?: () => void;
+    } | undefined;
+    try {
+        if (RN?.AppState) {
+            appStateSub = RN.AppState.addEventListener('change', (state: string) => {
+                if (state === 'active' && scout.rootSpan == null) {
+                    const name = navigationRef.getCurrentRoute?.()?.name;
+                    if (name) {
+                        currentScreen = name;
+                        enterAt = Date.now();
+                        startScreen(name);
+                    }
+                }
+            });
+        }
+    }
+    catch {
+    }
+    return () => {
+        unsub?.();
+        try {
+            appStateSub?.remove?.();
+        }
+        catch {
+        }
+    };
     function startScreen(name: string) {
         const loadingType = isFirstScreen ? 'initial_load' : 'route_change';
         isFirstScreen = false;
