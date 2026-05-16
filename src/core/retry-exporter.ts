@@ -3,7 +3,10 @@ import type { ResolvedRetry } from './config';
 interface RetryableExporter {
     export(items: unknown, callback: (result: ExportResult) => void): void;
 }
-export function wrapWithRetry<E extends RetryableExporter>(exporter: E, opts: ResolvedRetry): E {
+export interface RetryHooks {
+    onFailedAfterRetries?: (items: unknown) => void;
+}
+export function wrapWithRetry<E extends RetryableExporter>(exporter: E, opts: ResolvedRetry, hooks: RetryHooks = {}): E {
     if (opts.maxRetries <= 0)
         return exporter;
     const originalExport = exporter.export.bind(exporter);
@@ -16,6 +19,13 @@ export function wrapWithRetry<E extends RetryableExporter>(exporter: E, opts: Re
                     return;
                 }
                 if (attempt >= opts.maxRetries || !isRetryableError(result.error)) {
+                    if (isRetryableError(result.error) && hooks.onFailedAfterRetries) {
+                        try {
+                            hooks.onFailedAfterRetries(items);
+                        }
+                        catch {
+                        }
+                    }
                     callback(result);
                     return;
                 }

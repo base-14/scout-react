@@ -46,6 +46,14 @@ export interface ScoutConfig {
         initialDelayMs?: number;
         maxDelayMs?: number;
     };
+    offlineBuffer?: {
+        enabled?: boolean;
+        maxItems?: {
+            traces?: number;
+            metrics?: number;
+            logs?: number;
+        };
+    };
     debug?: boolean;
 }
 export interface ResolvedRetry {
@@ -53,7 +61,15 @@ export interface ResolvedRetry {
     initialDelayMs: number;
     maxDelayMs: number;
 }
-export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend' | 'applicationId' | 'buildId' | 'exportRetry'>> {
+export interface ResolvedOfflineBuffer {
+    enabled: boolean;
+    maxItems: {
+        traces: number;
+        metrics: number;
+        logs: number;
+    };
+}
+export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend' | 'applicationId' | 'buildId' | 'exportRetry' | 'offlineBuffer'>> {
     environment?: string;
     headers?: Record<string, string>;
     resourceAttributes?: Attributes;
@@ -63,6 +79,7 @@ export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment'
     applicationId?: string;
     buildId?: string;
     exportRetry: ResolvedRetry;
+    offlineBuffer: ResolvedOfflineBuffer;
 }
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
@@ -115,6 +132,14 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
             maxRetries: Math.max(0, config.exportRetry?.maxRetries ?? 3),
             initialDelayMs: Math.max(100, config.exportRetry?.initialDelayMs ?? 1000),
             maxDelayMs: Math.max(1000, config.exportRetry?.maxDelayMs ?? 30000),
+        },
+        offlineBuffer: {
+            enabled: config.offlineBuffer?.enabled ?? true,
+            maxItems: {
+                traces: Math.max(0, config.offlineBuffer?.maxItems?.traces ?? 5000),
+                metrics: Math.max(0, config.offlineBuffer?.maxItems?.metrics ?? 2000),
+                logs: Math.max(0, config.offlineBuffer?.maxItems?.logs ?? 5000),
+            },
         },
         debug: config.debug ?? false,
     };

@@ -76,7 +76,35 @@ What happens when an export fails. The SDK wraps every OTLP exporter with retry-
 
 **What's retryable**: network errors (fetch reject / abort / timeout / ECONNREFUSED / ENOTFOUND), HTTP `408`, `429`, and any `5xx` status. Everything else (`400`, `401`, `403`, etc.) is treated as permanent and surfaces immediately so the batch is dropped without burning retries.
 
-**What still goes wrong**: when `maxRetries` is exhausted, the batch is dropped. There is no on-disk persistence — if the device is offline longer than `traceMaxQueueSize` spans of activity, you'll lose data. Persistence is a future-work item.
+## Offline buffer
+
+When in-memory retry is exhausted on a retryable failure, the batch is **persisted to disk** instead of being dropped. Buffered batches are replayed on next `Scout.initialize()`, on app foreground (RN), and on `visibilitychange → visible` / `online` events (web).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `offlineBuffer.enabled` | `boolean` | `true` | Master toggle. Set `false` for strict at-most-once delivery. |
+| `offlineBuffer.maxItems.traces` | `number` | `5000` | FIFO cap on persisted span items. Oldest evicted first when exceeded. |
+| `offlineBuffer.maxItems.metrics` | `number` | `2000` | Same, for metric data points. |
+| `offlineBuffer.maxItems.logs` | `number` | `5000` | Same, for log records. |
+
+**Storage backend**: AsyncStorage on RN, localStorage on web. One key per signal type. Atomic per-batch eviction — if the FIFO cap would be exceeded by a new batch, the oldest batches are shifted out until the cap is satisfied.
+
+**Replay path**: persisted payloads are sent as raw OTLP JSON via `fetch` (bypassing the in-memory exporter pipeline). The user's configured `headers` are reused so auth still works. Drain stops on the first failure to preserve order; later attempts pick up where they left off.
+
+**What still goes wrong**: storage caps mean very long outages still cause loss (oldest data evicted first — your most recent data survives). Storage backend quota errors are caught and the batch is dropped silently. If the app crashes mid-write, that batch is lost.
+
+### Sizing guide
+
+Measured from a real Scout RN session: an OTLP-serialized span averages **~5 KB** (range 3–6 KB) because every span carries ~50 attributes (battery, network, a11y, device, session, enduser). Heavier than a typical backend span (~1 KB) which doesn't carry RUM context. Use this to size `maxItems`:
+
+| Profile | `traces` | `metrics` | `logs` | Worst-case disk |
+|---|---|---|---|---|
+| **Default** | `5000` | `2000` | `5000` | ~25–35 MB |
+| Low-end Android, conservative | `2000` | `1000` | `2000` | ~10–15 MB |
+| High-traffic app, long-outage tolerant | `10000` | `5000` | `10000` | ~50–70 MB |
+| Web (localStorage 5–10 MB quota) | `3000` | `1500` | `3000` | ~15–20 MB |
+
+If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Android, AsyncStorage spills large blobs to SQLite — writes start to slow noticeably above ~5 MB per key, so prefer many small batches (which is what `traceMaxExportBatchSize` already controls) over fewer huge ones.
 
 ## Sessions
 

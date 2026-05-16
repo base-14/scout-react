@@ -11,6 +11,7 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, } from '@opentelemetry/semanti
 import { Scout as ScoutCore } from '../core/scout';
 import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
 import { wrapWithRetry } from '../core/retry-exporter';
+import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SPAN } from '../core/spans';
@@ -84,6 +85,7 @@ export const Scout = {
         const resolved = resolveConfig(config);
         const endpoint = resolveEndpoint(resolved.endpoint, resolved.secure);
         const platform = new NativePlatform();
+        const offline = buildOfflineWiring(platform, endpoint, resolved.offlineBuffer);
         const baseAttrs = await platform.collectResourceAttributes();
         const resource = resourceFromAttributes({
             [ATTR_SERVICE_NAME]: resolved.serviceName,
@@ -101,7 +103,7 @@ export const Scout = {
             url: `${endpoint}/v1/traces`,
             headers,
             timeoutMillis: resolved.exportTimeoutMs,
-        }), resolved.exportRetry);
+        }), resolved.exportRetry, offline.hooks.traces);
         const traceProvider = new BasicTracerProvider({
             resource,
             spanProcessors: [
@@ -118,7 +120,7 @@ export const Scout = {
             url: `${endpoint}/v1/metrics`,
             headers,
             timeoutMillis: resolved.exportTimeoutMs,
-        }), resolved.exportRetry);
+        }), resolved.exportRetry, offline.hooks.metrics);
         const meterProvider = new MeterProvider({
             resource,
             readers: [
@@ -134,7 +136,7 @@ export const Scout = {
             url: `${endpoint}/v1/logs`,
             headers,
             timeoutMillis: resolved.exportTimeoutMs,
-        }), resolved.exportRetry);
+        }), resolved.exportRetry, offline.hooks.logs);
         const loggerProvider = new LoggerProvider({
             resource,
             processors: [
@@ -150,6 +152,23 @@ export const Scout = {
         const core = new ScoutCore(config, platform);
         await core.bootstrap();
         _instance = core;
+        void offline.drainAll(headers);
+        if (resolved.enableLifecycleTracking) {
+            let lastState: string | undefined;
+            try {
+                const RN = require('react-native');
+                const sub = RN?.AppState?.addEventListener?.('change', (state: string) => {
+                    if (lastState !== 'active' && state === 'active') {
+                        void offline.drainAll(headers);
+                    }
+                    lastState = state;
+                });
+                if (sub?.remove)
+                    _disposers.push(() => sub.remove());
+            }
+            catch {
+            }
+        }
         while (_pendingNavigationRefs.length > 0) {
             const navRef = _pendingNavigationRefs.shift();
             try {
