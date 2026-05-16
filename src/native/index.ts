@@ -10,7 +10,7 @@ import { logs } from '@opentelemetry/api-logs';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, } from '@opentelemetry/semantic-conventions';
 import { Scout as ScoutCore } from '../core/scout';
 import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
-import type { Attributes } from '../core/types';
+import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SPAN } from '../core/spans';
 import { NativePlatform } from './platform';
@@ -23,7 +23,11 @@ import { installNativeAnrDetector } from './instrumentations/anr';
 import { installNativeMemoryTracker } from './instrumentations/memory';
 import { installNativeFrameMetricsTracker } from './instrumentations/frame-metrics';
 import { installNativeConsoleCapture } from './instrumentations/console';
+import { installNativeScrollTracker } from './instrumentations/scroll';
+import { installNativeTapTracker } from './instrumentations/tap';
 import { installNativeCrashReader } from './instrumentations/native-crash';
+import { installNativeContextTracker } from './instrumentations/context';
+import { emitScoutConfigLog, emitScoutUsageOnce } from '../core/telemetry';
 import { ScoutRootBoundary } from './error-boundary';
 import { withSuppression, isSuppressingSdkErrors } from './soft-load';
 export { ATTR } from '../core/attributes';
@@ -83,6 +87,10 @@ export const Scout = {
             [ATTR_SERVICE_NAME]: resolved.serviceName,
             [ATTR_SERVICE_VERSION]: resolved.serviceVersion,
             ...(resolved.environment ? { environment: resolved.environment } : {}),
+            ...(resolved.applicationId
+                ? { [ATTR.APPLICATION_ID]: resolved.applicationId }
+                : {}),
+            ...(resolved.buildId ? { [ATTR.APP_BUILD_ID]: resolved.buildId } : {}),
             ...baseAttrs,
             ...((resolved.resourceAttributes as Record<string, any>) ?? {}),
         });
@@ -139,11 +147,19 @@ export const Scout = {
             _disposers.push(installNativeFrameMetricsTracker(core, resolved.longTaskThresholdMs));
         if (resolved.captureConsole)
             _disposers.push(installNativeConsoleCapture(core));
+        _disposers.push(installNativeTapTracker(core));
+        _disposers.push(installNativeScrollTracker(core));
+        _disposers.push(installNativeContextTracker(core));
         _disposers.push(await installNativeCrashDetector(core));
         void installNativeCrashReader(core);
         core.startRootSpan(SPAN.APP_STARTUP, {
             [ATTR.APP_STARTUP_TYPE]: 'session',
         });
+        try {
+            emitScoutConfigLog(core);
+        }
+        catch {
+        }
         if (installedEarlyHandler) {
             _disposers.push(() => {
                 try {
@@ -201,6 +217,8 @@ export const Scout = {
         return _instance;
     },
     logEvent(name: string, attributes?: Attributes): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'logEvent');
         _instance?.logEvent(name, attributes);
     },
     addBreadcrumb(type: string, message: string): void {
@@ -210,13 +228,56 @@ export const Scout = {
         handled?: boolean;
         library?: string;
     }): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'reportError');
         _instance?.reportError(error, opts);
     },
     setUser(id: string, attributes?: Attributes): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'setUser');
         _instance?.setUser(id, attributes);
     },
     clearUser(): void {
         _instance?.clearUser();
+    },
+    setAccount(id: string, name?: string): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'setAccount');
+        _instance?.setAccount(id, name);
+    },
+    clearAccount(): void {
+        _instance?.clearAccount();
+    },
+    setFeatureFlag(name: string, value: AttributeValue): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'setFeatureFlag');
+        _instance?.setFeatureFlag(name, value);
+    },
+    clearFeatureFlags(): void {
+        _instance?.clearFeatureFlags();
+    },
+    addTiming(name: string): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'addTiming');
+        _instance?.addTiming(name);
+    },
+    startVital(name: string, description?: string): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'startVital');
+        _instance?.startVital(name, description);
+    },
+    endVital(name: string): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'endVital');
+        _instance?.endVital(name);
+    },
+    recordOperationStep(name: string, stepType: 'start' | 'update' | 'retry' | 'end', opts?: {
+        key?: string;
+        failureReason?: 'error' | 'abandoned' | 'other';
+    }): void {
+        if (_instance)
+            emitScoutUsageOnce(_instance, 'recordOperationStep');
+        _instance?.recordOperationStep(name, stepType, opts);
     },
     logDebug(message: string, attributes?: Attributes): void {
         _instance?.logDebug(message, attributes);

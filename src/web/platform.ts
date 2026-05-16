@@ -47,6 +47,31 @@ export class WebPlatform implements PlatformAdapter {
             attrs['screen.pixel_ratio'] = Number((globalThis as any).devicePixelRatio);
         }
         attrs[ATTR.DEVICE_IS_PHYSICAL] = 'true';
+        const win = globalThis as any;
+        if (typeof win.innerWidth === 'number') {
+            attrs[ATTR.VIEWPORT_WIDTH] = Number(win.innerWidth);
+        }
+        if (typeof win.innerHeight === 'number') {
+            attrs[ATTR.VIEWPORT_HEIGHT] = Number(win.innerHeight);
+        }
+        try {
+            const intl = win.Intl?.DateTimeFormat?.();
+            if (intl?.resolvedOptions) {
+                const opts = intl.resolvedOptions();
+                if (opts.locale)
+                    attrs[ATTR.APPLICATION_LOCALE] = String(opts.locale);
+                if (opts.timeZone)
+                    attrs[ATTR.DEVICE_TIME_ZONE] = String(opts.timeZone);
+            }
+        }
+        catch {
+        }
+        if (typeof nav.hardwareConcurrency === 'number') {
+            attrs[ATTR.DEVICE_LOGICAL_CPU_COUNT] = Number(nav.hardwareConcurrency);
+        }
+        if (typeof nav.deviceMemory === 'number') {
+            attrs[ATTR.DEVICE_TOTAL_RAM] = Math.round(nav.deviceMemory * 1024);
+        }
         return attrs;
     }
     getConnectionType(): string {

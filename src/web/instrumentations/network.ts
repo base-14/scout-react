@@ -2,6 +2,12 @@ import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { claimResourceEntry } from '../performance-buffer';
+import { resourceTimingAttributes } from './resource-timing';
+import { lookupProvider } from '../../core/provider-lookup';
+import { parseGraphQLRequest, parseGraphQLResponse } from '../../core/graphql-parser';
+import type { Attributes } from '../../core/types';
+import { uuidv4 } from '../../core/uuid';
 export function installNetworkTracker(scout: Scout): () => void {
     const ignore = scout.config.ignoreUrlPatterns ?? [];
     const firstPartyMatchers = compileFirstPartyMatchers(scout.config.firstPartyHosts ?? []);
@@ -41,9 +47,14 @@ export function installNetworkTracker(scout: Scout): () => void {
             }
             const start = performance.now();
             const headers = new Headers(init?.headers ?? (input as Request).headers ?? {});
+            const providerAttrs = providerAttrsFor(url);
+            const graphqlAttrs = graphqlReqAttrsFor(init?.body);
             const httpSpan = scout.startChildSpan(SPAN.HTTP_REQUEST, {
+                [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
                 [ATTR.HTTP_METHOD]: method,
                 [ATTR.HTTP_URL]: url,
+                ...providerAttrs,
+                ...graphqlAttrs,
                 ...scout.commonAttributes(),
             });
             if (httpSpan && isFirstParty(url)) {
@@ -60,8 +71,34 @@ export function installNetworkTracker(scout: Scout): () => void {
                         [ATTR.HTTP_RESPONSE_CONTENT_LENGTH]: length,
                         [ATTR.HTTP_DURATION_MS]: duration,
                     });
+                    try {
+                        const entry = claimResourceEntry(url, start);
+                        if (entry)
+                            httpSpan.setAttributes(resourceTimingAttributes(entry) as never);
+                    }
+                    catch {
+                    }
                     if (response.status >= 400) {
                         httpSpan.setStatus({ code: SpanStatusCode.ERROR });
+                    }
+                    if (graphqlAttrs[ATTR.GRAPHQL_OPERATION_TYPE] != null ||
+                        String(response.headers.get('content-type') ?? '').includes('application/json')) {
+                        try {
+                            const clone = response.clone();
+                            void clone.text().then((txt) => {
+                                const gql = parseGraphQLResponse(txt);
+                                if (gql) {
+                                    httpSpan.setAttributes({
+                                        [ATTR.GRAPHQL_ERROR_COUNT]: gql.errorCount,
+                                        [ATTR.GRAPHQL_ERRORS_JSON]: gql.errors.length > 0
+                                            ? JSON.stringify(gql.errors).slice(0, 4000)
+                                            : '',
+                                    });
+                                }
+                            });
+                        }
+                        catch {
+                        }
                     }
                     httpSpan.end();
                 }
@@ -115,12 +152,23 @@ export function installNetworkTracker(scout: Scout): () => void {
             const finalize = (statusOverride?: number, errorMsg?: string) => {
                 const duration = performance.now() - start;
                 const status = statusOverride ?? this.status;
+                const phaseAttrs = (() => {
+                    try {
+                        const entry = claimResourceEntry(meta.url, start);
+                        return entry ? resourceTimingAttributes(entry) : {};
+                    }
+                    catch {
+                        return {};
+                    }
+                })();
                 scout.emitSpan(SPAN.HTTP_REQUEST, {
+                    [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
                     [ATTR.HTTP_METHOD]: meta.method,
                     [ATTR.HTTP_URL]: meta.url,
                     [ATTR.HTTP_STATUS_CODE]: status,
                     [ATTR.HTTP_DURATION_MS]: duration,
                     ...(errorMsg ? { [ATTR.HTTP_ERROR]: errorMsg } : {}),
+                    ...phaseAttrs,
                     ...scout.commonAttributes(),
                 }, { status: errorMsg || status >= 400 ? SpanStatusCode.ERROR : undefined });
                 scout.addBreadcrumb(BREADCRUMB_TYPE.HTTP, `${meta.method} ${meta.url} → ${errorMsg ?? status}`);
@@ -174,6 +222,34 @@ function stripScheme(url: string): string {
 }
 function makeTraceparent(): string {
     return `00-${randHex(32)}-${randHex(16)}-01`;
+}
+function providerAttrsFor(url: string): Attributes {
+    const p = lookupProvider(url);
+    if (!p)
+        return {};
+    return {
+        [ATTR.HTTP_PROVIDER_DOMAIN]: p.domain,
+        [ATTR.HTTP_PROVIDER_NAME]: p.name,
+        [ATTR.HTTP_PROVIDER_TYPE]: p.type,
+    };
+}
+function graphqlReqAttrsFor(body: unknown): Attributes {
+    const gql = parseGraphQLRequest(body);
+    if (!gql)
+        return {};
+    const out: Attributes = {
+        [ATTR.GRAPHQL_OPERATION_TYPE]: gql.operationType,
+    };
+    if (gql.operationName)
+        out[ATTR.GRAPHQL_OPERATION_NAME] = gql.operationName;
+    if (gql.variables != null) {
+        try {
+            out[ATTR.GRAPHQL_VARIABLES] = JSON.stringify(gql.variables).slice(0, 4000);
+        }
+        catch {
+        }
+    }
+    return out;
 }
 function randHex(len: number): string {
     const bytes = new Uint8Array(len / 2);

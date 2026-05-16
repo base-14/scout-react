@@ -73,7 +73,11 @@ export class NativePlatform implements PlatformAdapter {
         if (RN?.Platform) {
             attrs[ATTR.OS_NAME] = String(RN.Platform.OS);
             if (RN.Platform.Version != null) {
-                attrs[ATTR.OS_VERSION] = String(RN.Platform.Version);
+                const v = String(RN.Platform.Version);
+                attrs[ATTR.OS_VERSION] = v;
+                const major = v.split('.')[0];
+                if (major)
+                    attrs[ATTR.OS_VERSION_MAJOR] = major;
             }
         }
         if (DeviceInfo) {
@@ -82,9 +86,80 @@ export class NativePlatform implements PlatformAdapter {
                 attrs[ATTR.DEVICE_MANUFACTURER] = await DeviceInfo.getManufacturer();
                 attrs[ATTR.DEVICE_BRAND] = await DeviceInfo.getBrand();
                 attrs[ATTR.DEVICE_IS_PHYSICAL] = String(!(await DeviceInfo.isEmulator()));
+                try {
+                    const abis = await DeviceInfo.supportedAbis?.();
+                    if (Array.isArray(abis) && abis[0]) {
+                        attrs[ATTR.DEVICE_ARCHITECTURE] = String(abis[0]);
+                    }
+                }
+                catch {
+                }
+                try {
+                    const ram = await DeviceInfo.getTotalMemory?.();
+                    if (typeof ram === 'number' && ram > 0) {
+                        attrs[ATTR.DEVICE_TOTAL_RAM] = Math.round(ram / (1024 * 1024));
+                    }
+                }
+                catch {
+                }
+                try {
+                    const isLowRam = await DeviceInfo.isLowRamDevice?.();
+                    if (typeof isLowRam === 'boolean') {
+                        attrs[ATTR.DEVICE_IS_LOW_RAM] = isLowRam;
+                    }
+                }
+                catch {
+                }
+                try {
+                    const isTablet = await DeviceInfo.isTablet?.();
+                    if (isTablet)
+                        attrs[ATTR.DEVICE_TYPE] = 'tablet';
+                    else
+                        attrs[ATTR.DEVICE_TYPE] = 'mobile';
+                }
+                catch {
+                }
             }
             catch {
             }
+        }
+        try {
+            const intl = (globalThis as any).Intl?.DateTimeFormat?.();
+            if (intl?.resolvedOptions) {
+                const opts = intl.resolvedOptions();
+                if (opts.locale)
+                    attrs[ATTR.DEVICE_LOCALE] = String(opts.locale);
+                if (opts.timeZone)
+                    attrs[ATTR.DEVICE_TIME_ZONE] = String(opts.timeZone);
+            }
+        }
+        catch {
+        }
+        try {
+            const cpus = (globalThis as any).navigator?.hardwareConcurrency;
+            if (typeof cpus === 'number' && cpus > 0) {
+                attrs[ATTR.DEVICE_LOGICAL_CPU_COUNT] = cpus;
+            }
+        }
+        catch {
+        }
+        try {
+            if (RN?.I18nManager?.isRTL != null) {
+                attrs[ATTR.A11Y_RTL_ENABLED] = !!RN.I18nManager.isRTL;
+            }
+        }
+        catch {
+        }
+        try {
+            const psm = ExpoBattery?.isLowPowerModeEnabledAsync
+                ? await ExpoBattery.isLowPowerModeEnabledAsync()
+                : DeviceInfo?.isPowerSaveMode
+                    ? await DeviceInfo.isPowerSaveMode()
+                    : null;
+            if (typeof psm === 'boolean')
+                attrs[ATTR.DEVICE_POWER_SAVING_MODE] = psm;
+        }
+        catch {
         }
         if (RN?.Dimensions) {
             try {
@@ -92,9 +167,21 @@ export class NativePlatform implements PlatformAdapter {
                 attrs['screen.width'] = win.width;
                 attrs['screen.height'] = win.height;
                 attrs['screen.pixel_ratio'] = win.scale;
+                attrs[ATTR.VIEWPORT_WIDTH] = win.width;
+                attrs[ATTR.VIEWPORT_HEIGHT] = win.height;
             }
             catch {
             }
+        }
+        try {
+            const intl = (globalThis as any).Intl?.DateTimeFormat?.();
+            if (intl?.resolvedOptions) {
+                const opts = intl.resolvedOptions();
+                if (opts.locale)
+                    attrs[ATTR.APPLICATION_LOCALE] = String(opts.locale);
+            }
+        }
+        catch {
         }
         try {
             const battery = await readBattery();

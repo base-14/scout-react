@@ -14,6 +14,9 @@ export const SPAN = {
     ANR: 'anr',
     HTTP_REQUEST: 'http.request',
     WEB_VITAL: 'web_vital',
+    CUSTOM_TIMING: 'custom_timing',
+    CUSTOM_VITAL: 'custom_vital',
+    OPERATION_STEP: 'operation_step',
 } as const;
 export const BREADCRUMB_TYPE = {
     TAP: 'tap',

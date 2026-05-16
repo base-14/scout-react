@@ -26,3 +26,24 @@ examples/*/.expo/
 examples/*/.eas/
 examples/*/web-build/
 examples/*/dist/
+
+# Local Expo modules: keep the .kt / .swift / .podspec / package.json
+# sources, but never commit gradle / xcodebuild build caches.
+examples/*/modules/*/android/build/
+examples/*/modules/*/ios/build/
+examples/*/modules/*/ios/Pods/
+
+# Scout SDK's own native module build output (gradle + CMake + xcodebuild).
+# `android/` and `ios/` themselves are tracked source; only their build
+# caches and CMake's `.cxx/` working dir need to be ignored.
+android/build/
+android/.cxx/
+android/.gradle/
+android/local.properties
+ios/build/
+ios/Pods/
+ios/*.xcworkspace/
+*.xcuserdata/
+
+# Internal reference docs / vendor mapping — keep local, never commit.
+docs/

@@ -5,6 +5,187 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — RUM parity additions
+
+**Web — deep Performance API capture**
+
+- `http.request` spans now carry the full PerformanceResourceTiming phase
+  breakdown — `http.phase.dns.{start,duration}_ms`,
+  `http.phase.connect.{start,duration}_ms`,
+  `http.phase.ssl.{start,duration}_ms`,
+  `http.phase.first_byte.{start,duration}_ms`,
+  `http.phase.download.{start,duration}_ms`,
+  `http.phase.redirect.{start,duration}_ms`,
+  `http.phase.worker.{start,duration}_ms` — plus
+  `http.response.body.encoded_size`, `http.response.body.decoded_size`,
+  `http.transfer_size`, `network.protocol.name`, `http.delivery_type`,
+  `http.render_blocking_status`, `http.resource.type`.
+- `long_task` spans subscribe to **`long-animation-frame`** entries
+  (Chrome 123+) in addition to `longtask`. Adds
+  `long_task.blocking_duration_ms`, `long_task.render_start_ms`,
+  `long_task.style_and_layout_start_ms`,
+  `long_task.first_ui_event_timestamp_ms`, and a JSON-encoded
+  `long_task.scripts_json` describing every script that executed during
+  the frame.
+- `app_startup` (cold) now carries `browser.navigation.dom_complete_ms`,
+  `browser.navigation.dom_content_loaded_ms`,
+  `browser.navigation.dom_interactive_ms`,
+  `browser.navigation.load_event_ms`, `browser.navigation.first_byte_ms`
+  from `PerformanceNavigationTiming`.
+- CLS layout-shift rects (`web.vital.cls.previous_rect.{x,y,width,height}`
+  + `current_rect.*`), INP sub-parts (`web.vital.inp.input_delay_ms`,
+  `processing_duration_ms`, `presentation_delay_ms`), LCP sub-parts
+  (`web.vital.lcp.load_delay_ms`, `load_time_ms`, `render_delay_ms`,
+  `resource_url`), plus `web.vital.target_selector` on CLS / FID / INP /
+  LCP.
+
+**React Native — device context + accessibility**
+
+- `network.connectivity.status` / `network.effective_type` /
+  `network.interfaces` / `network.cellular.carrier_name` flow through
+  NetInfo, refreshed on every change.
+- Resource attributes now include `device.architecture`, `device.locale`,
+  `device.locales`, `device.time_zone`, `device.power_saving_mode`,
+  `device.total_ram`, `device.logical_cpu_count`, `device.is_low_ram`,
+  `device.type`.
+- 22 `a11y.*` attributes (`screen_reader_enabled`, `bold_text_enabled`,
+  `reduce_motion_enabled`, `invert_colors_enabled`, `grayscale_enabled`,
+  `assistive_touch_enabled`, `closed_captioning_enabled`, etc.) read from
+  `AccessibilityInfo` and a new `ScoutCrash.getAccessibilitySnapshot`
+  native bridge — `UIAccessibility` queries on iOS, `Settings.*` queries
+  on Android. Refreshed on `app_resumed`.
+
+**Per-view counters + Web Vitals as screen_view attrs**
+
+- `view.action.count`, `view.error.count`, `view.crash.count`,
+  `view.long_task.count`, `view.frozen_frame.count`,
+  `view.resource.count`, `view.frustration.count` — Counter metrics
+  attributed by `screen.name`. 
+- Web Vitals also decorate the current `screen_view` span as
+  `web.vital.<name>.value` / `.rating` plus the sub-parts above.
+
+**Frustration detection on web**
+
+- `user_interaction` spans now tagged with `action.frustration.type`:
+  `rage_click` (≥3 clicks within 1s on the same selector), `dead_click`
+  (no DOM mutation within 600ms of the click), `error_click` (uncaught
+  error within ±100ms of the click). New `view.frustration.count` metric
+  rolls these up per screen.
+
+**GraphQL + provider classification**
+
+- `http.request` body inspected at call-time for GraphQL operations.
+  Adds `graphql.operation.type` (query/mutation/subscription),
+  `graphql.operation.name`, `graphql.variables` (capped),
+  `graphql.error.count`, `graphql.errors_json` (capped).
+- URL → provider lookup table classifies third-party requests:
+  `http.provider.name` (`google-fonts`, `stripe`, `cloudfront`, etc.),
+  `http.provider.type` (`cdn`, `analytics`, `ad`, `tag-manager`,
+  `social`, `content`, `customer-success`, `utility`, `hosting`),
+  `http.provider.domain`.
+
+**New public APIs**
+
+- `Scout.addTiming(name)` — user-defined named timing relative to current
+  screen_view start. Emits `custom_timing` span and decorates the active
+  root span with `view.custom_timings.<name>`.
+- `Scout.startVital(name)` / `Scout.endVital(name)` — user-defined named
+  durations. Emits `custom_vital` span with `vital.type = "duration"`.
+- `Scout.recordOperationStep(name, "start"|"update"|"retry"|"end", opts)`
+  — multi-step business-operation tracking. Emits `operation_step` span.
+- `Scout.setFeatureFlag(name, value)` / `clearFeatureFlags()` — attach
+  `feature_flag.<name>` to every subsequent span/metric/log via runtime
+  attributes, so error spans automatically carry the flag values that
+  were active at error time.
+- `Scout.setAccount(id, name?)` / `clearAccount()` — B2B SaaS account
+  identifier alongside `setUser` (sessions groupable by tenant).
+
+**SDK self-telemetry logs**
+
+- `scout.config` log emitted once at session start with ~30 SDK config
+  fields as attributes (`scout.config.session_sample_rate`,
+  `scout.config.long_task_threshold_ms`, `scout.config.capture_console`,
+  `scout.config.use_before_send`, `scout.config.first_party_hosts_count`,
+  etc.). Tagged with `scout.diag = true` so users can filter telemetry
+  out of business dashboards.
+- `scout.usage` log emitted the first time each public API is called per
+  session (`logEvent`, `setUser`, `setAccount`, `setFeatureFlag`,
+  `addTiming`, `startVital`, `endVital`, `recordOperationStep`,
+  `reportError`).
+
+**Native signal-based crash capture**
+
+- **iOS — KSCrash 2.5+** wired as the primary native-crash subsystem.
+  Additionally extracts the ARM64 exception-state registers — `far` and
+  `esr` — into `crash.fault_address_register` and
+  `crash.exception_syndrome_register` so the OTLP span matches the
+  bottom two lines of Apple's `.ips` report exactly.
+  Replaces the hand-rolled `NSSetUncaughtExceptionHandler` and POSIX
+  signal handler with KSCrash's mach-exception / signal / NSException /
+  C++ exception / main-thread-deadlock / user-reported monitors. The
+  `native_crash` span now carries the same data Apple's `.ips` files do:
+  mach exception type + code (`crash.mach_exception = "EXC_BAD_ACCESS"`,
+  `crash.mach_code`), all threads' stacks (symbolicated where KSCrash can
+  via `dladdr`; raw addresses for the host app's own frames which the
+  backend symbolicates via uploaded `.dSYM`), full register dump for the
+  crashed thread (`crash.registers_json`), binary images with UUIDs
+  (`crash.binary_images_json`), OS / kernel / device / CPU / build-type
+  metadata. The hand-rolled `ScoutSignalHandler.{h,m}` and POSIX
+  signal handler remain in the tree as a fallback but are not installed
+  by default.
+- **Android — NDK signal handler:** `cpp/scout_signal_handler.c` + JNI
+  bridge — 6 signals via `sigaction`, stack via `_Unwind_Backtrace`.
+  Linked as a shared library (`libscout_signal_handler.so`) and loaded
+  lazily from `ScoutNdkSignalHandler.kt`. Reports tagged
+  `crash.type = "ndk_signal"`. (No KSCrash equivalent on Android —
+  `ApplicationExitInfo` covers the bulk of native deaths via tombstone
+  retrieval on next launch.)
+
+**Apple-grade crash diagnostics via MetricKit (iOS)**
+
+- New `ScoutMetricKitCollector` (iOS 14+) subscribes to
+  `MXMetricManager`. On `didReceive(_ payloads:)` writes one report per
+  `MXCrashDiagnostic` (`mxc_*.json`) and per `MXHangDiagnostic`
+  (`mxh_*.json`). Carries `crash.exception_type`, `crash.exception_code`,
+  `crash.termination_reason`, `crash.application_version`,
+  `crash.application_build_version`, `crash.os_version`,
+  `crash.device_type`, `crash.region_format`,
+  `crash.callstack_tree_json` (full multi-thread tree from
+  `MXCallStackTree.jsonRepresentation()`, truncated at 32KB), and for
+  hangs `crash.hang_duration_ms`. Reports arrive ~24h after the crash;
+  the existing signal-handler path remains for next-launch coverage.
+
+**OS-recorded process deaths via ApplicationExitInfo (Android)**
+
+- New `ScoutExitInfoCollector` (API 30+, Android 11+) — polls
+  `ActivityManager.getHistoricalProcessExitReasons` on every SDK init,
+  emits one report (`exit_*.json`) per OS-recorded process death newer
+  than the persisted watermark. Persists `last_timestamp` in a
+  SharedPreferences file so the same death isn't reported twice.
+  Captures `crash.os_reason_code` / `crash.os_reason_name` (`crash`,
+  `crash_native`, `anr`, `low_memory`, `excessive_resource_usage`,
+  `initialization_failure`, `signaled`), `crash.exit_status`,
+  `crash.death_timestamp_ms`, `crash.process_name`, `crash.pid`,
+  `crash.importance`, `crash.pss_kb`, `crash.rss_kb`, plus the full
+  thread dump or tombstone in `crash.tombstone` (capped at 32KB).
+
+### Changed
+
+- `crash-test` local Expo module added inside
+  `examples/platform-design-mobile/modules/crash-test/` (NOT part of the
+  SDK). Provides `crashWithSignal("SIGSEGV" | "SIGABRT" | …)` so the
+  diagnostics panel can verify native-signal capture end-to-end.
+
+### Tests
+
+- 107 tests pass (up from 90). New contract tests for resource-timing
+  attribute mapping, GraphQL request/response parsing, and provider
+  classification.
+
+---
+
 ## [0.1.1] - 2026-05-13
 
 ### Changed

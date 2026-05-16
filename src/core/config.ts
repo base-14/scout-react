@@ -4,6 +4,8 @@ export interface ScoutConfig {
     endpoint: string;
     serviceVersion?: string;
     environment?: string;
+    applicationId?: string;
+    buildId?: string;
     secure?: boolean;
     headers?: Record<string, string>;
     resourceAttributes?: Attributes;
@@ -35,13 +37,15 @@ export interface ScoutConfig {
     logExportScheduledDelayMs?: number;
     debug?: boolean;
 }
-export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend'>> {
+export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment' | 'headers' | 'resourceAttributes' | 'firstPartyHosts' | 'ignoreUrlPatterns' | 'beforeSend' | 'applicationId' | 'buildId'>> {
     environment?: string;
     headers?: Record<string, string>;
     resourceAttributes?: Attributes;
     firstPartyHosts?: Array<string | RegExp>;
     ignoreUrlPatterns?: RegExp[];
     beforeSend?: BeforeSendCallback;
+    applicationId?: string;
+    buildId?: string;
 }
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
@@ -53,6 +57,8 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
         endpoint: config.endpoint,
         serviceVersion: config.serviceVersion ?? '1.0.0',
         environment: config.environment,
+        applicationId: config.applicationId,
+        buildId: config.buildId,
         secure: config.secure ?? true,
         headers: config.headers,
         resourceAttributes: config.resourceAttributes,

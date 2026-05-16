@@ -1,6 +1,7 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+import { uuidv4 } from '../../core/uuid';
 interface NavigationRef {
     getCurrentRoute?: () => {
         name?: string;
@@ -9,8 +10,10 @@ interface NavigationRef {
 }
 export function installNativeNavigationTracker(scout: Scout, navigationRef: NavigationRef): () => void {
     let currentScreen = navigationRef.getCurrentRoute?.()?.name ?? 'unknown';
+    let previousScreen = '';
     let enterAt = Date.now();
-    scout.startRootSpan(SPAN.SCREEN_VIEW, { [ATTR.SCREEN_NAME]: currentScreen });
+    let isFirstScreen = true;
+    startScreen(currentScreen);
     scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${currentScreen}`);
     if (!navigationRef.addListener)
         return () => { };
@@ -25,10 +28,22 @@ export function installNativeNavigationTracker(scout: Scout, navigationRef: Navi
             ...scout.commonAttributes(),
         });
         scout.addBreadcrumb(BREADCRUMB_TYPE.VIEW_SESSION, `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`);
+        previousScreen = currentScreen;
         currentScreen = next;
         enterAt = Date.now();
-        scout.startRootSpan(SPAN.SCREEN_VIEW, { [ATTR.SCREEN_NAME]: next });
+        startScreen(next);
         scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
     });
     return () => unsub?.();
+    function startScreen(name: string) {
+        const loadingType = isFirstScreen ? 'initial_load' : 'route_change';
+        isFirstScreen = false;
+        scout.startRootSpan(SPAN.SCREEN_VIEW, {
+            [ATTR.SCREEN_NAME]: name,
+            [ATTR.VIEW_ID]: uuidv4(),
+            [ATTR.VIEW_LOADING_TYPE]: loadingType,
+            ...(previousScreen ? { [ATTR.VIEW_REFERRER]: previousScreen } : {}),
+            [ATTR.VIEW_IS_ACTIVE]: true,
+        });
+    }
 }

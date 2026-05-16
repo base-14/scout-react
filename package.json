@@ -1,6 +1,6 @@
 {
   "name": "@base14/scout-react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Zero-config OpenTelemetry RUM for React and React Native. Auto-captures clicks, navigation, errors, lifecycle, network, performance, and web vitals.",
   "license": "MIT",
   "author": "base-14",
@@ -26,13 +26,15 @@
       "types": "./dist/web/react/index.d.ts",
       "import": "./dist/web/react/index.js",
       "require": "./dist/web/react/index.cjs"
-    }
+    },
+    "./babel-plugin": "./babel-plugin/index.cjs"
   },
   "files": [
     "dist",
     "src",
     "ios",
     "android",
+    "babel-plugin",
     "expo-module.config.json",
     "README.md",
     "LICENSE"

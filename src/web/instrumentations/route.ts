@@ -1,12 +1,15 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+import { uuidv4 } from '../../core/uuid';
 export function installRouteTracker(scout: Scout): () => void {
     if (typeof window === 'undefined' || typeof history === 'undefined') {
         return () => { };
     }
     let currentScreen = locationToScreen();
+    let previousScreen = '';
     let enterTimeMs = performance.now();
+    let isFirstScreen = true;
     startScreenSpan(currentScreen);
     const handleChange = () => {
         const next = locationToScreen();
@@ -19,14 +22,24 @@ export function installRouteTracker(scout: Scout): () => void {
             ...scout.commonAttributes(),
         });
         scout.addBreadcrumb(BREADCRUMB_TYPE.VIEW_SESSION, `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`);
+        previousScreen = currentScreen;
         currentScreen = next;
         enterTimeMs = performance.now();
         startScreenSpan(currentScreen);
     };
     function startScreenSpan(name: string) {
         const startedAt = performance.now();
+        const loadingType = isFirstScreen ? 'initial_load' : 'route_change';
+        isFirstScreen = false;
+        const viewId = uuidv4();
+        const url = typeof window !== 'undefined' ? window.location.href : '';
         scout.startRootSpan(SPAN.SCREEN_VIEW, {
             [ATTR.SCREEN_NAME]: name,
+            [ATTR.VIEW_ID]: viewId,
+            [ATTR.VIEW_URL]: url,
+            [ATTR.VIEW_LOADING_TYPE]: loadingType,
+            ...(previousScreen ? { [ATTR.VIEW_REFERRER]: previousScreen } : {}),
+            [ATTR.VIEW_IS_ACTIVE]: true,
         });
         scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${name}`);
         requestAnimationFrame(() => {
@@ -35,6 +48,7 @@ export function installRouteTracker(scout: Scout): () => void {
                 scout.emitSpan(SPAN.SCREEN_LOAD, {
                     [ATTR.SCREEN_NAME]: name,
                     [ATTR.SCREEN_LOAD_TIME]: loadTime,
+                    [ATTR.VIEW_LOADING_TIME_MS]: loadTime * 1000,
                     ...scout.commonAttributes(),
                 });
             });

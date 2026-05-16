@@ -4,16 +4,48 @@ import type { Scout } from '../../core/scout';
 export function installLifecycleTracker(scout: Scout): () => void {
     if (typeof document === 'undefined')
         return () => { };
+    let currentRoot: unknown = scout.rootSpan;
+    let viewStart = performance.now();
+    let foregroundStart: number | null = document.visibilityState === 'visible' ? 0 : null;
+    let periods: Array<{
+        start: number;
+        duration: number;
+    }> = [];
+    const flushPeriods = () => {
+        const span = scout.rootSpan;
+        if (!span)
+            return;
+        if (span !== currentRoot) {
+            currentRoot = span;
+            viewStart = performance.now();
+            periods = [];
+            foregroundStart = document.visibilityState === 'visible' ? 0 : null;
+        }
+        try {
+            span.setAttribute(ATTR.VIEW_IN_FOREGROUND_PERIODS_JSON, JSON.stringify(periods));
+        }
+        catch {
+        }
+    };
     const onVisibilityChange = () => {
         try {
             if (document.visibilityState === 'hidden') {
                 scout.emitSpan(SPAN.APP_PAUSED, scout.commonAttributes());
                 scout.addBreadcrumb(BREADCRUMB_TYPE.LIFECYCLE, 'paused');
+                if (foregroundStart != null) {
+                    periods.push({
+                        start: Math.round(foregroundStart),
+                        duration: Math.round(performance.now() - viewStart - foregroundStart),
+                    });
+                    foregroundStart = null;
+                    flushPeriods();
+                }
             }
             else if (document.visibilityState === 'visible') {
                 void scout.sessionManager.maybeRotateOnResume().then(() => {
                     scout.emitSpan(SPAN.APP_RESUMED, scout.commonAttributes());
                     scout.addBreadcrumb(BREADCRUMB_TYPE.LIFECYCLE, 'resumed');
+                    foregroundStart = performance.now() - viewStart;
                 });
             }
         }
