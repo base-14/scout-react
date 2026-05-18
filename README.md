@@ -23,8 +23,8 @@ That's all the code you write.
 # from npm (after publish)
 npm install @base14/scout-react
 
-# from git
-npm install github:base-14/scout-react#v0.1.1
+# from git (pin to a tag)
+npm install github:base-14/scout-react#v0.1.4
 ```
 
 Peer deps are installed by the host app on demand (none of them are required for the web entry):
@@ -133,14 +133,14 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | ANR | `anr` | Web: worker watchdog. RN: timer-drift watchdog. |
 | HTTP (fetch + XHR) | `http.request` | Method, URL, status, duration, content-length |
 | Crash (OOM / force-kill) | `app_crash` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN) — survives unclean termination |
-| Native crash (RN) | `native_crash` on next launch | iOS NSException via `NSSetUncaughtExceptionHandler`; Android Java/Kotlin via `Thread.setDefaultUncaughtExceptionHandler`. Report persisted to disk by the bundled `ScoutCrash` Expo module, emitted as a span on next launch with `crash.type`, `crash.reason`, `crash.stack_trace`, `crash.thread`, and the prior session's breadcrumbs |
+| Native crash (RN) | `native_crash` on next launch | iOS: **KSCrash 2.5+** (mach exceptions, POSIX signals, C++, NSException, main-thread deadlock) + **MetricKit** (`MXCrashDiagnostic`, `MXHangDiagnostic`) on iOS 14+. Android: uncaught Java/Kotlin (`Thread.setDefaultUncaughtExceptionHandler`) + **NDK signal handler** for native crashes + **ApplicationExitInfo** (API 30+) for OS-recorded process deaths including OOM and ANR. Reports persisted to disk and emitted on next launch with full register / stack / binary-image dumps, prior breadcrumbs, and `crash.type` / `crash.reason` / `crash.stack_trace` |
 | Logs | OTLP logs | `Scout.logDebug/Info/Warning/Error` and (opt-in) `console.*` capture |
 
 ### Web only
 
 | Signal | Notes |
 |---|---|
-| Web vitals | LCP, FID, CLS, INP, TTFB, FCP via `web-vitals` |
+| Web vitals | LCP, INP, CLS, TTFB, FCP via `web-vitals` (with sub-parts — INP `input_delay_ms`/`processing_duration_ms`/`presentation_delay_ms`, LCP `load_delay_ms`/`load_time_ms`/`render_delay_ms`, CLS layout-shift rects) |
 | Memory | `web.memory.usage` gauge (Chromium only) |
 | Frame metrics | `web.frame.build_time` histogram via Long Animation Frame API |
 | Battery | `device.battery.level`, `device.battery.state` via `navigator.getBattery` (Chromium) |
@@ -295,6 +295,19 @@ await Scout.initialize({
   metricExportIntervalMs: 30000,
   logExportScheduledDelayMs: 5000,
 
+  // Retry on retryable failures (network errors, 408, 429, 5xx)
+  exportRetry: {
+    maxRetries: 3,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+  },
+
+  // On-disk offline buffer — replayed on next init / foreground / online
+  offlineBuffer: {
+    enabled: true,
+    maxItems: { traces: 5000, metrics: 2000, logs: 5000 },
+  },
+
   // Debug
   debug: false,
 });
@@ -302,12 +315,28 @@ await Scout.initialize({
 
 ---
 
+## Background flush
+
+On RN, the SDK calls `Scout.flush()` when `AppState` transitions from `active`
+to `background` / `inactive`. On web, it flushes on `visibilitychange =
+hidden` and `pagehide`. This drains the BatchSpanProcessor, metric reader,
+and log processor before the OS suspends / kills the process — without it,
+events emitted in the last few seconds (the ones leading up to a crash)
+would die with the in-memory batch queue.
+
+If your in-memory exporter still doesn't deliver in time (e.g. the OS kills
+us mid-POST), the **offline buffer** persists the batch to disk and
+replays it on next `Scout.initialize()`. See [Configuration → Offline
+buffer](docs/configuration.md#offline-buffer).
+
+---
+
 ## Out of scope (for now)
 
 | Signal | Why not |
 |---|---|
-| iOS signal-based crashes (SIGSEGV / SIGABRT / mach exceptions) | Requires KSCrash or Crashpad integration. NSException-style crashes ARE captured today via `NSSetUncaughtExceptionHandler`. Signal coverage is planned. |
-| Android native (NDK) crashes | Requires a C signal handler with libunwind. Uncaught Java/Kotlin exceptions ARE captured today via `Thread.setDefaultUncaughtExceptionHandler`. |
+| Session Replay (DOM / view-tree recording) | Heavyweight payload + privacy implications. Not on the roadmap. |
+| Profiling (continuous CPU sampling) | No reliable cross-platform sampler. Not on the roadmap. |
 | Frame raster time (web) | Browsers expose only whole-frame durations via Long Animation Frame. We emit `web.frame.build_time` covering the full frame. |
 | CPU usage (web) | No browser API. |
 

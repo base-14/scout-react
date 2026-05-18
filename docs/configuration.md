@@ -86,6 +86,7 @@ When in-memory retry is exhausted on a retryable failure, the batch is **persist
 | `offlineBuffer.maxItems.traces` | `number` | `5000` | FIFO cap on persisted span items. Oldest evicted first when exceeded. |
 | `offlineBuffer.maxItems.metrics` | `number` | `2000` | Same, for metric data points. |
 | `offlineBuffer.maxItems.logs` | `number` | `5000` | Same, for log records. |
+| `maxOfflineStorageMb` | `number` | `5` | Coarse total-disk cap for the offline buffer. Runs alongside the per-signal `offlineBuffer.maxItems.*` caps above — whichever limit is reached first wins. |
 
 **Storage backend**: AsyncStorage on RN, localStorage on web. One key per signal type. Atomic per-batch eviction — if the FIFO cap would be exceeded by a new batch, the oldest batches are shifted out until the cap is satisfied.
 
@@ -112,7 +113,6 @@ If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Andr
 |---|---|---|---|
 | `sessionTimeoutMinutes` | `number` | `30` | Inactivity timeout before a new `session.id` is minted. |
 | `sessionSampleRate` | `number (0-100)` | `100` | Percent of sessions sampled. Below `100`, full sessions are dropped (not individual events) so you keep coherent session traces. |
-| `maxOfflineStorageMb` | `number` | `5` | Soft cap on offline persistence size. Currently advisory (no on-disk persistence yet). |
 
 ## Auto-instrumentation toggles
 
