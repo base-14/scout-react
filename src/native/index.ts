@@ -149,6 +149,7 @@ export const Scout = {
             ],
         });
         logs.setGlobalLoggerProvider(loggerProvider);
+        (Scout as any)._providers = { traceProvider, meterProvider, loggerProvider };
         const core = new ScoutCore(config, platform);
         await core.bootstrap();
         _instance = core;
@@ -192,7 +193,7 @@ export const Scout = {
         if (resolved.enableErrorTracking)
             _disposers.push(installNativeRejectionTracker(core));
         if (resolved.enableLifecycleTracking)
-            _disposers.push(installNativeLifecycleTracker(core));
+            _disposers.push(installNativeLifecycleTracker(core, () => Scout.flush()));
         if (resolved.enableNetworkTracking)
             _disposers.push(installNativeNetworkTracker(core));
         if (resolved.enableAnrDetection)
@@ -353,9 +354,27 @@ export const Scout = {
     logError(message: string, attributes?: Attributes): void {
         _instance?.logError(message, attributes);
     },
+    async flush(): Promise<void> {
+        const p = (Scout as any)._providers;
+        if (!p)
+            return;
+        await Promise.allSettled([
+            p.traceProvider.forceFlush(),
+            p.meterProvider.forceFlush(),
+            p.loggerProvider.forceFlush(),
+        ]);
+    },
     async shutdown(): Promise<void> {
         for (const d of _disposers.splice(0))
             d();
+        const p = (Scout as any)._providers;
+        if (p) {
+            await Promise.allSettled([
+                p.traceProvider.shutdown(),
+                p.meterProvider.shutdown(),
+                p.loggerProvider.shutdown(),
+            ]);
+        }
         await _instance?.shutdown();
         _instance = null;
     },

@@ -1,7 +1,7 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
-export function installLifecycleTracker(scout: Scout): () => void {
+export function installLifecycleTracker(scout: Scout, onBackgroundFlush?: () => void | Promise<void>): () => void {
     if (typeof document === 'undefined')
         return () => { };
     let currentRoot: unknown = scout.rootSpan;
@@ -40,6 +40,11 @@ export function installLifecycleTracker(scout: Scout): () => void {
                     foregroundStart = null;
                     flushPeriods();
                 }
+                try {
+                    void onBackgroundFlush?.();
+                }
+                catch {
+                }
             }
             else if (document.visibilityState === 'visible') {
                 void scout.sessionManager.maybeRotateOnResume().then(() => {
@@ -58,6 +63,11 @@ export function installLifecycleTracker(scout: Scout): () => void {
                 ...scout.commonAttributes(),
                 [ATTR.ERROR_HANDLED]: 'true',
             });
+            try {
+                void onBackgroundFlush?.();
+            }
+            catch {
+            }
         }
         catch {
         }

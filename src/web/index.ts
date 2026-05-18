@@ -135,7 +135,7 @@ export const Scout = {
         if (resolved.enableErrorTracking)
             _disposers.push(installErrorTracker(core));
         if (resolved.enableLifecycleTracking)
-            _disposers.push(installLifecycleTracker(core));
+            _disposers.push(installLifecycleTracker(core, () => Scout.flush()));
         if (resolved.enableStartupTracking)
             _disposers.push(installStartupTracker(core));
         if (resolved.enableAutoTapTracking) {

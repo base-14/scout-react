@@ -7,7 +7,7 @@ try {
 }
 catch {
 }
-export function installNativeLifecycleTracker(scout: Scout): () => void {
+export function installNativeLifecycleTracker(scout: Scout, onBackgroundFlush?: () => void | Promise<void>): () => void {
     const AppState = RN?.AppState;
     if (!AppState)
         return () => { };
@@ -22,6 +22,11 @@ export function installNativeLifecycleTracker(scout: Scout): () => void {
                 }
                 scout.emitSpan(SPAN.APP_PAUSED, scout.commonAttributes());
                 scout.addBreadcrumb(BREADCRUMB_TYPE.LIFECYCLE, 'paused');
+                try {
+                    void onBackgroundFlush?.();
+                }
+                catch {
+                }
             }
             else if (last !== 'active' && state === 'active') {
                 void scout.sessionManager.maybeRotateOnResume().then(() => {
