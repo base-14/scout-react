@@ -375,7 +375,7 @@ src/
 │   ├── scope.ts            ── SCOPE_NAME = "base14.scout.react" (CI-enforced)
 │   ├── telemetry.ts        ── self-emit scout.config + scout.usage events
 │   ├── graphql-parser.ts   ── decodes fetch bodies into operation_name/type/variables
-│   └── provider-lookup.ts  ── classifies hostnames (Stripe, Datadog, …)
+│   └── provider-lookup.ts  ── classifies hostnames (Stripe, …)
 │
 ├── web/
 │   ├── index.ts            ── Scout facade: initialize() builds OTel providers + installs trackers
