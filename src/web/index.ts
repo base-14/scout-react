@@ -118,6 +118,16 @@ export const Scout = {
         const core = new ScoutCore(config, platform);
         await core.bootstrap();
         _instance = core;
+        const pending = (Scout as unknown as {
+            _pendingWebViewBridge?: Parameters<typeof core.setWebViewBridge>[0];
+        })._pendingWebViewBridge;
+        if (pending) {
+            core.setWebViewBridge(pending);
+            (Scout as unknown as {
+                _pendingWebViewBridge?: unknown;
+            })._pendingWebViewBridge =
+                undefined;
+        }
         void offline.drainAll(headers);
         if (typeof document !== 'undefined') {
             const onVisible = () => {
@@ -193,6 +203,20 @@ export const Scout = {
         if (_instance)
             emitScoutUsageOnce(_instance, 'logEvent');
         _instance?.logEvent(name, attributes);
+    },
+    setWebViewBridge(bridge: {
+        sessionId?: string;
+        anonymousId?: string;
+        send?: (payload: Record<string, unknown>) => void;
+    }): void {
+        if (_instance) {
+            _instance.setWebViewBridge(bridge);
+        }
+        else {
+            (Scout as unknown as {
+                _pendingWebViewBridge?: typeof bridge;
+            })._pendingWebViewBridge = bridge;
+        }
     },
     addBreadcrumb(type: string, message: string): void {
         _instance?.addBreadcrumb(type, message);
@@ -290,3 +314,12 @@ export const Scout = {
     },
 };
 export default Scout;
+if (typeof globalThis !== 'undefined' && typeof window !== 'undefined') {
+    try {
+        (window as unknown as {
+            Scout?: typeof Scout;
+        }).Scout = Scout;
+    }
+    catch {
+    }
+}

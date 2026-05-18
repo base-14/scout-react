@@ -58,6 +58,25 @@ export class SessionManager {
         this.current.lastActiveAt = Date.now();
         void this.persist();
     }
+    adoptExternalSessionId(id: string): void {
+        if (!id)
+            return;
+        const now = Date.now();
+        if (this.current) {
+            this.current.id = id;
+            this.current.lastActiveAt = now;
+            this.current.sampled = true;
+        }
+        else {
+            this.current = {
+                id,
+                startedAt: now,
+                lastActiveAt: now,
+                sampled: true,
+            };
+        }
+        void this.persist();
+    }
     async rotate(): Promise<string> {
         this.current = this.create();
         await this.persist();

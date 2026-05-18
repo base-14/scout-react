@@ -215,6 +215,22 @@ export class Scout {
         return attrs;
     }
     private _anonymousId: string | null = null;
+    private _webViewBridgeSend?: (payload: Record<string, unknown>) => void;
+    setWebViewBridge(bridge: {
+        sessionId?: string;
+        anonymousId?: string;
+        send?: (payload: Record<string, unknown>) => void;
+    }): void {
+        if (typeof bridge?.sessionId === 'string' && bridge.sessionId) {
+            this.session.adoptExternalSessionId(bridge.sessionId);
+        }
+        if (typeof bridge?.anonymousId === 'string' && bridge.anonymousId) {
+            this._anonymousId = bridge.anonymousId;
+        }
+        if (typeof bridge?.send === 'function') {
+            this._webViewBridgeSend = bridge.send;
+        }
+    }
     timeSinceAppStartMs(): number {
         return Date.now() - this._appStartedAt;
     }
@@ -440,6 +456,17 @@ export class Scout {
         span.end(opts.endTime);
         this.session.touch();
         this.bumpViewCounter(name, filtered.attributes);
+        if (this._webViewBridgeSend) {
+            try {
+                this._webViewBridgeSend({
+                    type: name,
+                    attributes: filtered.attributes,
+                    timestamp_ms: Date.now(),
+                });
+            }
+            catch {
+            }
+        }
         return span;
     }
     private bumpViewCounter(spanName: string, attributes: Attributes): void {
