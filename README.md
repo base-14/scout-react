@@ -20,11 +20,7 @@ That's all the code you write.
 ## Install
 
 ```bash
-# from npm (after publish)
 npm install @base-14/scout-react
-
-# from git (pin to a tag)
-npm install github:base-14/scout-react#v0.1.4
 ```
 
 Peer deps are installed by the host app on demand (none of them are required for the web entry):
