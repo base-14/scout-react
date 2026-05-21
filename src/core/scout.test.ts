@@ -9,6 +9,7 @@ async function makeScout(overrides: Record<string, unknown> = {}) {
         serviceName: 'test-svc',
         endpoint: 'http://localhost:4318',
         secure: false,
+        sessionSampleRate: 100,
         ...overrides,
     }, platform);
     await s.bootstrap();
@@ -164,6 +165,73 @@ describe('Scout.reportUncaught', () => {
         const span = recorder.spans()[0];
         expect(span?.attributes[ATTR.ERROR_TYPE]).toBe('uncaught_error');
         expect(span?.attributes[ATTR.ERROR_HANDLED]).toBe('false');
+    });
+});
+describe('errors bypass session sampling by default', () => {
+    let recorder: Recorder;
+    beforeEach(() => {
+        recorder = makeRecorder();
+    });
+    it('reportError still emits when sessionSampleRate=0 and alwaysCaptureErrors defaults to true', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.reportError(new Error('kaboom'));
+        expect(recorder.spans()).toHaveLength(1);
+        expect(recorder.spans()[0]?.name).toBe(SPAN.ERROR);
+    });
+    it('reportUncaught still emits when sessionSampleRate=0 and alwaysCaptureErrors defaults to true', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.reportUncaught(new Error('async fail'));
+        expect(recorder.spans()).toHaveLength(1);
+        expect(recorder.spans()[0]?.attributes[ATTR.ERROR_TYPE]).toBe('uncaught_error');
+    });
+    it('logError still emits when sessionSampleRate=0 and alwaysCaptureErrors defaults to true', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.logError('payment failed');
+        expect(recorder.logs()).toHaveLength(1);
+        expect(recorder.logs()[0]?.severityText).toBe('ERROR');
+    });
+    it('reportError respects sampling when alwaysCaptureErrors=false', async () => {
+        const s = await makeScout({ sessionSampleRate: 0, alwaysCaptureErrors: false });
+        s.reportError(new Error('kaboom'));
+        expect(recorder.spans()).toHaveLength(0);
+    });
+    it('logError respects sampling when alwaysCaptureErrors=false', async () => {
+        const s = await makeScout({ sessionSampleRate: 0, alwaysCaptureErrors: false });
+        s.logError('payment failed');
+        expect(recorder.logs()).toHaveLength(0);
+    });
+    it('native_crash span bypasses sampling by default', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.emitSpan(SPAN.NATIVE_CRASH, { 'crash.type': 'SIGSEGV' });
+        expect(recorder.spans()).toHaveLength(1);
+        expect(recorder.spans()[0]?.name).toBe(SPAN.NATIVE_CRASH);
+    });
+    it('app_crash span bypasses sampling by default', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.emitSpan(SPAN.APP_CRASH, { 'crash.reason': 'oom' });
+        expect(recorder.spans()).toHaveLength(1);
+        expect(recorder.spans()[0]?.name).toBe(SPAN.APP_CRASH);
+    });
+    it('anr span bypasses sampling by default', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.emitSpan(SPAN.ANR, { 'anr.duration_ms': 6000 });
+        expect(recorder.spans()).toHaveLength(1);
+        expect(recorder.spans()[0]?.name).toBe(SPAN.ANR);
+    });
+    it('non-error spans still respect sampling when sessionSampleRate=0', async () => {
+        const s = await makeScout({ sessionSampleRate: 0 });
+        s.emitSpan(SPAN.USER_INTERACTION, { 'user_interaction.target': '#btn' });
+        s.emitSpan(SPAN.HTTP_REQUEST, { 'http.url': 'https://api' });
+        s.emitSpan(SPAN.LONG_TASK, { 'long_task.duration_ms': 200 });
+        expect(recorder.spans()).toHaveLength(0);
+    });
+    it('all error-class spans respect sampling when alwaysCaptureErrors=false', async () => {
+        const s = await makeScout({ sessionSampleRate: 0, alwaysCaptureErrors: false });
+        s.emitSpan(SPAN.ERROR, {});
+        s.emitSpan(SPAN.NATIVE_CRASH, {});
+        s.emitSpan(SPAN.APP_CRASH, {});
+        s.emitSpan(SPAN.ANR, {});
+        expect(recorder.spans()).toHaveLength(0);
     });
 });
 describe('Scout log emission', () => {

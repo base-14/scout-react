@@ -1,7 +1,7 @@
 import { context, trace, metrics, type Tracer, type Meter, type Span, SpanStatusCode, } from '@opentelemetry/api';
 import { logs, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { ATTR } from './attributes';
-import { SPAN, BREADCRUMB_TYPE } from './spans';
+import { SPAN, BREADCRUMB_TYPE, ERROR_CLASS_SPANS } from './spans';
 import { METRIC } from './metrics';
 import { applyBeforeSend } from './before-send';
 import { BreadcrumbManager } from './breadcrumb-manager';
@@ -186,7 +186,10 @@ export class Scout {
         if (span)
             this._viewStartedAt = performance.now();
     }
-    startRootSpan(name: string, attributes: Attributes = {}): Span {
+    startRootSpan(name: string, attributes: Attributes = {}): Span | null {
+        const bypassForErrors = this._config.alwaysCaptureErrors && ERROR_CLASS_SPANS.has(name);
+        if (!bypassForErrors && !this.session.isSampled)
+            return null;
         const span = this.tracer.startSpan(name, {
             attributes: toOtelAttrs({ ...attributes, ...this.commonAttributes() }),
         });
@@ -430,9 +433,12 @@ export class Scout {
         status?: SpanStatusCode;
         startTime?: number;
         endTime?: number;
+        forceSample?: boolean;
     } = {}): Span | null {
-        if (!this.session.isSampled)
+        const bypassForErrors = this._config.alwaysCaptureErrors && ERROR_CLASS_SPANS.has(name);
+        if (!opts.forceSample && !bypassForErrors && !this.session.isSampled) {
             return null;
+        }
         const filtered = applyBeforeSend(this._config.beforeSend, 'span', name, attributes);
         if (!filtered)
             return null;
@@ -565,11 +571,15 @@ export class Scout {
             this.debug('emitGauge failed', e);
         }
     }
-    emitLog(severity: SeverityText, message: string, attributes?: Attributes): void {
+    emitLog(severity: SeverityText, message: string, attributes?: Attributes, opts: {
+        forceSample?: boolean;
+    } = {}): void {
         if (!this._config.enableLogging)
             return;
-        if (!this.session.isSampled)
+        const bypassForErrors = this._config.alwaysCaptureErrors && severity === 'ERROR';
+        if (!opts.forceSample && !bypassForErrors && !this.session.isSampled) {
             return;
+        }
         const base: Attributes = {
             ...this.commonAttributes(),
             ...(attributes ?? {}),

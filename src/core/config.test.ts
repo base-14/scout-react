@@ -16,8 +16,9 @@ describe('resolveConfig', () => {
         expect(r.enableNetworkTracking).toBe(true);
         expect(r.enableLogging).toBe(true);
         expect(r.captureConsole).toBe(false);
-        expect(r.sessionSampleRate).toBe(100);
+        expect(r.sessionSampleRate).toBe(1);
         expect(r.sessionTimeoutMinutes).toBe(30);
+        expect(r.alwaysCaptureErrors).toBe(true);
     });
     it('clamps longTaskThresholdMs to a 20ms floor', () => {
         const r = resolveConfig({

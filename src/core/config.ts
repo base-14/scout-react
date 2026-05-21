@@ -29,6 +29,7 @@ export interface ScoutConfig {
     anrThresholdMs?: number;
     sessionSampleRate?: number;
     sessionTimeoutMinutes?: number;
+    alwaysCaptureErrors?: boolean;
     firstPartyHosts?: Array<string | RegExp>;
     ignoreUrlPatterns?: RegExp[];
     maxOfflineStorageMb?: number;
@@ -84,7 +85,7 @@ export interface ResolvedConfig extends Required<Omit<ScoutConfig, 'environment'
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
     const anrThresholdMs = Math.max(1000, config.anrThresholdMs ?? 5000);
-    const sessionSampleRate = clamp(config.sessionSampleRate ?? 100, 0, 100);
+    const sessionSampleRate = clamp(config.sessionSampleRate ?? 1, 0, 100);
     const captureConsole = config.captureConsole ?? config.capturePrintStatements ?? false;
     return {
         serviceName: config.serviceName,
@@ -116,6 +117,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
         anrThresholdMs,
         sessionSampleRate,
         sessionTimeoutMinutes: config.sessionTimeoutMinutes ?? 30,
+        alwaysCaptureErrors: config.alwaysCaptureErrors ?? true,
         firstPartyHosts: config.firstPartyHosts,
         ignoreUrlPatterns: config.ignoreUrlPatterns,
         maxOfflineStorageMb: config.maxOfflineStorageMb ?? 5,

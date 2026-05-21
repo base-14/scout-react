@@ -11,7 +11,12 @@ describe('installErrorTracker', () => {
     let dispose: () => void;
     beforeEach(async () => {
         recorder = makeRecorder();
-        scout = new Scout({ serviceName: 't', endpoint: 'http://localhost', secure: false }, memoryPlatform());
+        scout = new Scout({
+            serviceName: 't',
+            endpoint: 'http://localhost',
+            secure: false,
+            sessionSampleRate: 100,
+        }, memoryPlatform());
         await scout.bootstrap();
         dispose = installErrorTracker(scout);
     });

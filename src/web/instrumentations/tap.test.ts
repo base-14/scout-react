@@ -12,7 +12,12 @@ describe('installTapTracker', () => {
     beforeEach(async () => {
         document.body.innerHTML = '';
         recorder = makeRecorder();
-        scout = new Scout({ serviceName: 't', endpoint: 'http://localhost', secure: false }, memoryPlatform());
+        scout = new Scout({
+            serviceName: 't',
+            endpoint: 'http://localhost',
+            secure: false,
+            sessionSampleRate: 100,
+        }, memoryPlatform());
         await scout.bootstrap();
         dispose = installTapTracker(scout);
     });

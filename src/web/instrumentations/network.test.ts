@@ -16,6 +16,7 @@ describe('installNetworkTracker — fetch', () => {
             serviceName: 't',
             endpoint: 'http://collector.example:4318',
             secure: false,
+            sessionSampleRate: 100,
             firstPartyHosts: ['api.acme.com', '*.subs.acme.com', /^api\d+\.regex\.com$/],
         }, memoryPlatform());
         await scout.bootstrap();

@@ -18,6 +18,12 @@ export const SPAN = {
     CUSTOM_VITAL: 'custom_vital',
     OPERATION_STEP: 'operation_step',
 } as const;
+export const ERROR_CLASS_SPANS: ReadonlySet<string> = new Set([
+    SPAN.ERROR,
+    SPAN.NATIVE_CRASH,
+    SPAN.APP_CRASH,
+    SPAN.ANR,
+]);
 export const BREADCRUMB_TYPE = {
     TAP: 'tap',
     NAVIGATION: 'navigation',
