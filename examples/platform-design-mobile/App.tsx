@@ -18,7 +18,7 @@ function SongsStack() {
       <SongsStackNav.Screen name="SongDetail" component={SongDetailScreen}/>
     </SongsStackNav.Navigator>);
 }
-const ENDPOINT = 'https://otel.play-nbg1.base14.io/01kghetf42ztg8a4cnfayfje6a/rum';
+const ENDPOINT = 'http://localhost:34318';
 const AUTH_TOKEN = '';
 export default function App() {
     const navRef = useNavigationContainerRef();
@@ -32,12 +32,10 @@ export default function App() {
             serviceVersion: '0.1.0',
             environment: 'local',
             endpoint: ENDPOINT,
-            secure: true,
+            secure: false,
             debug: true,
-            firstPartyHosts: ['otel.play-nbg1.base14.io'],
-            headers: {
-                Authorization: AUTH_TOKEN,
-            },
+            firstPartyHosts: [],
+            sessionSampleRate: 0,
             metricExportIntervalMs: 2000,
             logExportScheduledDelayMs: 1000,
             traceExportIntervalMs: 2000,

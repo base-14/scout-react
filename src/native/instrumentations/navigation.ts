@@ -5,78 +5,80 @@ import { uuidv4 } from '../../core/uuid';
 import { withSuppression } from '../soft-load';
 let RN: any = null;
 try {
-    RN = withSuppression(() => require('react-native'));
-}
-catch {
-}
+  RN = withSuppression(() => require('react-native'));
+} catch {}
 interface NavigationRef {
-    getCurrentRoute?: () => {
+  getCurrentRoute?: () =>
+    | {
         name?: string;
-    } | undefined;
-    addListener?: (event: string, cb: () => void) => () => void;
+      }
+    | undefined;
+  addListener?: (event: string, cb: () => void) => () => void;
 }
-export function installNativeNavigationTracker(scout: Scout, navigationRef: NavigationRef): () => void {
-    let currentScreen = navigationRef.getCurrentRoute?.()?.name ?? 'unknown';
-    let previousScreen = '';
-    let enterAt = Date.now();
-    let isFirstScreen = true;
-    startScreen(currentScreen);
-    scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${currentScreen}`);
-    if (!navigationRef.addListener)
-        return () => { };
-    const unsub = navigationRef.addListener('state', () => {
-        const next = navigationRef.getCurrentRoute?.()?.name;
-        if (!next || next === currentScreen)
-            return;
-        const elapsed = (Date.now() - enterAt) / 1000;
-        scout.emitSpan(SPAN.VIEW_SESSION, {
-            [ATTR.SCREEN_NAME]: currentScreen,
-            [ATTR.VIEW_TIME_SPENT]: elapsed,
-            ...scout.commonAttributes(),
-        });
-        scout.addBreadcrumb(BREADCRUMB_TYPE.VIEW_SESSION, `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`);
-        previousScreen = currentScreen;
-        currentScreen = next;
-        enterAt = Date.now();
-        startScreen(next);
-        scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
+export function installNativeNavigationTracker(
+  scout: Scout,
+  navigationRef: NavigationRef,
+): () => void {
+  let currentScreen = navigationRef.getCurrentRoute?.()?.name ?? 'unknown';
+  let previousScreen = '';
+  let enterAt = Date.now();
+  let isFirstScreen = true;
+  startScreen(currentScreen);
+  scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${currentScreen}`);
+  if (!navigationRef.addListener) return () => {};
+  const unsub = navigationRef.addListener('state', () => {
+    const next = navigationRef.getCurrentRoute?.()?.name;
+    if (!next || next === currentScreen) return;
+    const elapsed = (Date.now() - enterAt) / 1000;
+    scout.emitSpan(SPAN.VIEW_SESSION, {
+      [ATTR.SCREEN_NAME]: currentScreen,
+      [ATTR.VIEW_TIME_SPENT]: elapsed,
+      ...scout.commonAttributes(),
     });
-    let appStateSub: {
+    scout.addBreadcrumb(
+      BREADCRUMB_TYPE.VIEW_SESSION,
+      `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`,
+    );
+    previousScreen = currentScreen;
+    currentScreen = next;
+    enterAt = Date.now();
+    startScreen(next);
+    scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
+  });
+  let appStateSub:
+    | {
         remove?: () => void;
-    } | undefined;
+      }
+    | undefined;
+  try {
+    if (RN?.AppState) {
+      appStateSub = RN.AppState.addEventListener('change', (state: string) => {
+        if (state === 'active' && scout.rootSpan == null) {
+          const name = navigationRef.getCurrentRoute?.()?.name;
+          if (name) {
+            currentScreen = name;
+            enterAt = Date.now();
+            startScreen(name);
+          }
+        }
+      });
+    }
+  } catch {}
+  return () => {
+    unsub?.();
     try {
-        if (RN?.AppState) {
-            appStateSub = RN.AppState.addEventListener('change', (state: string) => {
-                if (state === 'active' && scout.rootSpan == null) {
-                    const name = navigationRef.getCurrentRoute?.()?.name;
-                    if (name) {
-                        currentScreen = name;
-                        enterAt = Date.now();
-                        startScreen(name);
-                    }
-                }
-            });
-        }
-    }
-    catch {
-    }
-    return () => {
-        unsub?.();
-        try {
-            appStateSub?.remove?.();
-        }
-        catch {
-        }
-    };
-    function startScreen(name: string) {
-        const loadingType = isFirstScreen ? 'initial_load' : 'route_change';
-        isFirstScreen = false;
-        scout.startRootSpan(SPAN.SCREEN_VIEW, {
-            [ATTR.SCREEN_NAME]: name,
-            [ATTR.VIEW_ID]: uuidv4(),
-            [ATTR.VIEW_LOADING_TYPE]: loadingType,
-            ...(previousScreen ? { [ATTR.VIEW_REFERRER]: previousScreen } : {}),
-            [ATTR.VIEW_IS_ACTIVE]: true,
-        });
-    }
+      appStateSub?.remove?.();
+    } catch {}
+  };
+  function startScreen(name: string) {
+    const loadingType = isFirstScreen ? 'initial_load' : 'route_change';
+    isFirstScreen = false;
+    scout.startRootSpan(SPAN.SCREEN_VIEW, {
+      [ATTR.SCREEN_NAME]: name,
+      [ATTR.VIEW_ID]: uuidv4(),
+      [ATTR.VIEW_LOADING_TYPE]: loadingType,
+      ...(previousScreen ? { [ATTR.VIEW_REFERRER]: previousScreen } : {}),
+      [ATTR.VIEW_IS_ACTIVE]: true,
+    });
+  }
 }
