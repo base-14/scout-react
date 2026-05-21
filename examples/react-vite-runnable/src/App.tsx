@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import Scout from '@base14/scout-react';
-import { useScout } from '@base14/scout-react/react';
+import Scout from '@base-14/scout-react';
+import { useScout } from '@base-14/scout-react/react';
 export function App() {
     const scout = useScout();
     const [count, setCount] = useState(0);

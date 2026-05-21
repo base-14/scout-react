@@ -1,8 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import Scout from '@base14/scout-react';
-import { ScoutErrorBoundary } from '@base14/scout-react/react';
+import Scout from '@base-14/scout-react';
+import { ScoutErrorBoundary } from '@base-14/scout-react/react';
 import { App } from './App';
 import './styles.css';
 await Scout.initialize({

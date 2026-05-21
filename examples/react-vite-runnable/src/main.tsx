@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import Scout from '@base14/scout-react';
-import { ScoutErrorBoundary } from '@base14/scout-react/react';
+import Scout from '@base-14/scout-react';
+import { ScoutErrorBoundary } from '@base-14/scout-react/react';
 import { App } from './App';
 await Scout.initialize({
     serviceName: 'scout-react-example',

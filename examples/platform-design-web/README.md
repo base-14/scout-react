@@ -1,7 +1,7 @@
 # platform-design-web
 
 A multi-tab music app — Songs / News / Profile / Settings — modeled on Flutter's
-`platform_design` sample. Used to manually drive every `@base14/scout-react`
+`platform_design` sample. Used to manually drive every `@base-14/scout-react`
 signal type and verify it lands in a local OpenTelemetry collector.
 
 ## Run

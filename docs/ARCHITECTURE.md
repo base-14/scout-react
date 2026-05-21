@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how data flows through `@base14/scout-react` — from the moment the host app calls `Scout.initialize()` to the moment a span lands at the OTLP collector. It is meant for contributors who need to understand *why* the SDK is shaped the way it is before changing it.
+This document explains how data flows through `@base-14/scout-react` — from the moment the host app calls `Scout.initialize()` to the moment a span lands at the OTLP collector. It is meant for contributors who need to understand *why* the SDK is shaped the way it is before changing it.
 
 For *what* the SDK captures and *how to configure it*, see [`README.md`](./README.md) and [`docs/configuration.md`](./docs/configuration.md).
 

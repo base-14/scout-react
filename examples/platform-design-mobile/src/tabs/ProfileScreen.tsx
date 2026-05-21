@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Scout from '@base14/scout-react/native';
+import Scout from '@base-14/scout-react/native';
 import { DiagnosticsPanel } from '../components/DiagnosticsPanel';
 export function ProfileScreen() {
     return (<ScrollView style={styles.container} contentContainerStyle={{ padding: 12 }}>

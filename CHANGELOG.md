@@ -191,7 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **InstrumentationScope name is now `base14.scout.react`** (was
-  `@base14/scout-react`). Every span, metric, and log emitted by the SDK
+  `@base-14/scout-react`). Every span, metric, and log emitted by the SDK
   carries this scope, enforced by a CI guard test that fails the build if
   any code path mints a different scope name. Backend queries filtering on
   `scope.name` must be updated.
@@ -254,7 +254,7 @@ Initial release.
 
 ### Added
 
-- **Web entry (`@base14/scout-react`)** — bundled via tsup, ESM + CJS + d.ts.
+- **Web entry (`@base-14/scout-react`)** — bundled via tsup, ESM + CJS + d.ts.
   - Auto-captures: clicks (`user_interaction`), route changes (`screen_view`,
     `screen_load`, `view_session`), uncaught errors, unhandled rejections,
     fetch + XHR (`http.request`), lifecycle (visibilitychange), app startup
@@ -267,9 +267,9 @@ Initial release.
     parent under the browser's `http.request` span.
   - Per-screen trace propagation: each `screen_view` is a long-lived root
     span; every span on that screen shares its trace id.
-- **React subpath (`@base14/scout-react/react`)** — `ScoutProvider`,
+- **React subpath (`@base-14/scout-react/react`)** — `ScoutProvider`,
   `useScout` hook, `ScoutErrorBoundary`, `ScoutAction` annotation wrapper.
-- **Native entry (`@base14/scout-react/native`)** — compiled via `tsc` (no
+- **Native entry (`@base-14/scout-react/native`)** — compiled via `tsc` (no
   bundling) so Metro's static analyzer sees literal `require("react-native")`
   and bundles peer deps correctly.
   - `Scout.registerRootComponent(App)` — installs a root-level wrapper via

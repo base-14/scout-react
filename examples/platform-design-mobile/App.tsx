@@ -4,7 +4,7 @@ import { NavigationContainer, useNavigationContainerRef, } from '@react-navigati
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import Scout from '@base14/scout-react/native';
+import Scout from '@base-14/scout-react/native';
 import { SongsScreen } from './src/tabs/SongsScreen';
 import { SongDetailScreen } from './src/tabs/SongDetailScreen';
 import { NewsScreen } from './src/tabs/NewsScreen';
@@ -18,7 +18,8 @@ function SongsStack() {
       <SongsStackNav.Screen name="SongDetail" component={SongDetailScreen}/>
     </SongsStackNav.Navigator>);
 }
-const ENDPOINT = 'http://localhost:34318';
+const ENDPOINT = 'https://otel.play-nbg1.base14.io/01kghetf42ztg8a4cnfayfje6a/rum';
+const AUTH_TOKEN = '';
 export default function App() {
     const navRef = useNavigationContainerRef();
     const initialized = useRef(false);
@@ -31,9 +32,12 @@ export default function App() {
             serviceVersion: '0.1.0',
             environment: 'local',
             endpoint: ENDPOINT,
-            secure: false,
+            secure: true,
             debug: true,
-            firstPartyHosts: ['localhost', '127.0.0.1'],
+            firstPartyHosts: ['otel.play-nbg1.base14.io'],
+            headers: {
+                Authorization: AUTH_TOKEN,
+            },
             metricExportIntervalMs: 2000,
             logExportScheduledDelayMs: 1000,
             traceExportIntervalMs: 2000,

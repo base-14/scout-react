@@ -2,7 +2,7 @@
 
 Same UX as `platform-design-web`, but built with React Native + Expo so you can
 run it on an iOS simulator and on an Android phone over USB. Uses
-`@base14/scout-react/native`.
+`@base-14/scout-react/native`.
 
 ## One-time setup
 
@@ -83,5 +83,5 @@ npx expo run:android --device
   `expo run:ios` if you've prebuilt.
 - **Android can't reach collector**: confirm `adb reverse --list` shows
   `tcp:34318 tcp:34318`. Re-run after every USB reconnect.
-- **`Module not found: @base14/scout-react/native`**: from the package root run
+- **`Module not found: @base-14/scout-react/native`**: from the package root run
   `make build` first — Metro is wired to watch `../../dist`.

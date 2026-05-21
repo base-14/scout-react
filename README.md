@@ -5,7 +5,7 @@ Zero-config OpenTelemetry RUM (Real User Monitoring) for React (browser) and Rea
 Auto-captures clicks, navigation, errors, lifecycle, network, performance, web vitals, and device context. Exports over OTLP/HTTP.
 
 ```ts
-import Scout from '@base14/scout-react';
+import Scout from '@base-14/scout-react';
 
 await Scout.initialize({
   serviceName: 'my-app',
@@ -21,7 +21,7 @@ That's all the code you write.
 
 ```bash
 # from npm (after publish)
-npm install @base14/scout-react
+npm install @base-14/scout-react
 
 # from git (pin to a tag)
 npm install github:base-14/scout-react#v0.1.4
@@ -43,7 +43,7 @@ Peer deps are installed by the host app on demand (none of them are required for
 ## Quick start — React (browser)
 
 ```ts
-import Scout from '@base14/scout-react';
+import Scout from '@base-14/scout-react';
 
 await Scout.initialize({
   serviceName: 'my-app',
@@ -56,7 +56,7 @@ That's it. Clicks, route changes, errors, fetch + XHR, lifecycle, web vitals, lo
 Optional React helpers from the `/react` subpath:
 
 ```tsx
-import { ScoutProvider, useScout, ScoutErrorBoundary, ScoutAction } from '@base14/scout-react/react';
+import { ScoutProvider, useScout, ScoutErrorBoundary, ScoutAction } from '@base-14/scout-react/react';
 
 <ScoutProvider config={{ serviceName: 'my-app', endpoint: '...' }}>
   <ScoutErrorBoundary fallback={(e) => <ErrorPage error={e} />}>
@@ -78,7 +78,7 @@ Two lines in your entry file. Nothing in your component tree.
 
 ```ts
 // index.ts
-import Scout from '@base14/scout-react/native';
+import Scout from '@base-14/scout-react/native';
 import App from './App';
 
 Scout.registerRootComponent(App);
@@ -89,7 +89,7 @@ Scout.registerRootComponent(App);
 Then in your `App.tsx`:
 
 ```tsx
-import Scout from '@base14/scout-react/native';
+import Scout from '@base-14/scout-react/native';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 
 export default function App() {

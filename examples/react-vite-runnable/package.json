@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@base14/scout-react": "file:../..",
+    "@base-14/scout-react": "file:../..",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
