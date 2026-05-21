@@ -235,6 +235,42 @@ beforeSend: (event) => {
 
 ---
 
+## Sampling — defaults, and how errors stay loud
+
+Scout defaults to **1% session sampling** (`sessionSampleRate: 1`). Out of every ~100 user sessions, only one keeps the full instrumentation trail; the other 99 emit nothing. This keeps telemetry volume (and collector cost) bounded as your app scales.
+
+**Errors are never sampled out by default.** When `alwaysCaptureErrors: true` (the default), these signals bypass the session-sample gate and are always exported, regardless of whether the session was sampled in:
+
+| Signal | Span / log | Why it bypasses |
+|---|---|---|
+| Caught error reported via `Scout.reportError(...)` | `error` span | You always want failures visible. |
+| Uncaught JS exception, unhandled rejection, React error-boundary catch | `error` span | Same — drop on the floor isn't acceptable. |
+| `Scout.logError(...)` / ERROR-severity logs | log record | High-severity logs treated like errors. |
+| App crash (OOM / force-kill / unclean exit) | `app_crash` on next launch | Crashes that lose the prior session must reach you. |
+| Native crash (iOS Mach exception / Android NDK signal / JVM uncaught) | `native_crash` on next launch | Same — fatal-class signal. |
+| ANR (app not responding) | `anr` span | Fatal-class UX failure. |
+
+If you set `alwaysCaptureErrors: false`, errors get the same 1% treatment as everything else. Most teams should leave it at the default.
+
+Everything else — `user_interaction`, `screen_view`, `http.request`, `long_task`, `frozen_frame`, web vitals, performance metrics — respects `sessionSampleRate`. Crank it to `100` for dev, leave it at `1` for production high-traffic apps, or set it to something in between (e.g. `10`) for a less aggressive sample.
+
+```ts
+Scout.initialize({
+  serviceName: 'my-app',
+  endpoint: 'https://otel.example.com:4318',
+
+  sessionSampleRate: 1,           // default — 1% of sessions
+  alwaysCaptureErrors: true,      // default — errors always export
+
+  // For local dev / staging:
+  // sessionSampleRate: 100,      // capture every session
+});
+```
+
+The sampling decision is made **once per session**, then frozen for that session's lifetime. A session is either fully sampled in (every signal flows) or sampled out (only error-class signals flow). This keeps individual sessions coherent — you never get half-a-trace.
+
+---
+
 ## Full configuration
 
 ```ts
@@ -272,7 +308,8 @@ await Scout.initialize({
   anrThresholdMs: 5000,
 
   // Sessions
-  sessionSampleRate: 100,                    // 0..100
+  sessionSampleRate: 1,                      // 0..100, default 1 (1% of sessions)
+  alwaysCaptureErrors: true,                 // errors bypass sessionSampleRate (default true)
   sessionTimeoutMinutes: 30,
 
   // Network

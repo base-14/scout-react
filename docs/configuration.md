@@ -112,7 +112,8 @@ If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Andr
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `sessionTimeoutMinutes` | `number` | `30` | Inactivity timeout before a new `session.id` is minted. |
-| `sessionSampleRate` | `number (0-100)` | `100` | Percent of sessions sampled. Below `100`, full sessions are dropped (not individual events) so you keep coherent session traces. |
+| `sessionSampleRate` | `number (0-100)` | `1` | Percent of sessions sampled. Below `100`, full sessions are dropped (not individual events) so you keep coherent session traces. Errors bypass this gate by default — see `alwaysCaptureErrors`. |
+| `alwaysCaptureErrors` | `boolean` | `true` | When `true`, error- and crash-class spans (`error`, `native_crash`, `app_crash`, `anr`) and `ERROR`-severity logs bypass `sessionSampleRate` and are always exported. Set to `false` to subject errors to the same sampling decision as other telemetry. |
 
 ## Auto-instrumentation toggles
 
@@ -197,7 +198,8 @@ await Scout.initialize({
 
   // Sessions
   sessionTimeoutMinutes: 15,
-  sessionSampleRate: 100,
+  sessionSampleRate: 100,                    // crank up to 100 for full capture during dev
+  alwaysCaptureErrors: true,                 // default — errors bypass sampling
 
   // Resource
   resourceAttributes: {

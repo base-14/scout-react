@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`sessionSampleRate` default lowered from `100` to `1`** (1% of sessions). Production
+  default that bounds telemetry volume; set explicitly to `100` for development. See
+  the README "Sampling" section.
+
+### Added
+
+- **`alwaysCaptureErrors` (default `true`)** — error- and crash-class spans (`error`,
+  `native_crash`, `app_crash`, `anr`) and `ERROR`-severity logs now bypass
+  `sessionSampleRate` and are always exported. Set to `false` to subject errors to
+  the same sampling decision as other telemetry.
+- `ERROR_CLASS_SPANS` constant exported from `src/core/spans.ts` enumerates the span
+  names that participate in the bypass.
+
 ### Added — RUM parity additions
 
 **Web — deep Performance API capture**
@@ -62,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `view.action.count`, `view.error.count`, `view.crash.count`,
   `view.long_task.count`, `view.frozen_frame.count`,
   `view.resource.count`, `view.frustration.count` — Counter metrics
-  attributed by `screen.name`. 
+  attributed by `screen.name`.
 - Web Vitals also decorate the current `screen_view` span as
   `web.vital.<name>.value` / `.rating` plus the sub-parts above.
 
