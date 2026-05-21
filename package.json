@@ -31,7 +31,6 @@
   },
   "files": [
     "dist",
-    "src",
     "ios",
     "android/src",
     "android/build.gradle",
