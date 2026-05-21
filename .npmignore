@@ -12,3 +12,16 @@ tsconfig.json
 tsup.config.ts
 .eslintrc*
 .gitignore
+
+# Native build artifacts — never ship
+android/build/
+android/.cxx/
+android/.gradle/
+android/local.properties
+ios/build/
+ios/Pods/
+ios/Podfile.lock
+ios/*.xcworkspace/
+ios/DerivedData/
+**/*.o
+**/*.so
