@@ -57,6 +57,18 @@ interface BufferedError {
   error: unknown;
   isFatal: boolean;
 }
+
+async function readNativeProcessStartMs(): Promise<number | null> {
+  try {
+    const ExpoModules = withSuppression(() => require('expo-modules-core'));
+    const mod = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash');
+    if (typeof mod?.getProcessStartTimeMillis !== 'function') return null;
+    const v = await mod.getProcessStartTimeMillis();
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
 export const Scout = {
   async initialize(config: ScoutConfig): Promise<void> {
     if (_instance) return;
@@ -217,8 +229,15 @@ export const Scout = {
     _disposers.push(installNativeContextTracker(core));
     _disposers.push(await installNativeCrashDetector(core));
     void installNativeCrashReader(core);
-    core.startRootSpan(SPAN.APP_STARTUP, {
-      [ATTR.APP_STARTUP_TYPE]: 'session',
+    const nativeStartMs = await readNativeProcessStartMs();
+    const coldDurationSec =
+      nativeStartMs !== null
+        ? (Date.now() - nativeStartMs) / 1000
+        : core.timeSinceAppStartMs() / 1000;
+    core.emitSpan(SPAN.APP_STARTUP, {
+      [ATTR.APP_STARTUP_TYPE]: 'cold',
+      [ATTR.APP_STARTUP_DURATION]: coldDurationSec,
+      ...core.commonAttributes(),
     });
     try {
       emitScoutConfigLog(core);

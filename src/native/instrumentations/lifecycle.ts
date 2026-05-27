@@ -1,3 +1,4 @@
+import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { withSuppression } from '../soft-load';
@@ -24,10 +25,25 @@ export function installNativeLifecycleTracker(
           void onBackgroundFlush?.();
         } catch {}
       } else if (last !== 'active' && state === 'active') {
+        const resumeStart = Date.now();
         void scout.sessionManager.maybeRotateOnResume().then(() => {
           scout.emitSpan(SPAN.APP_RESUMED, scout.commonAttributes());
           scout.addBreadcrumb(BREADCRUMB_TYPE.LIFECYCLE, 'resumed');
         });
+        const emitWarm = (durationMs: number) => {
+          try {
+            scout.emitSpan(SPAN.APP_STARTUP, {
+              [ATTR.APP_STARTUP_TYPE]: 'warm',
+              [ATTR.APP_STARTUP_DURATION]: durationMs / 1000,
+              ...scout.commonAttributes(),
+            });
+          } catch {}
+        };
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => emitWarm(Date.now() - resumeStart));
+        } else {
+          emitWarm(0);
+        }
       }
       last = state;
     } catch {}

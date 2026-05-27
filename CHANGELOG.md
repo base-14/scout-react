@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-27
+
+### Added
+
+- **Cold and warm `app_startup` spans (native).** A new native
+  `getProcessStartTimeMillis` is exposed by `ScoutCrash` on Android and iOS so
+  the cold-start duration is measured from the OS process start, not from
+  `Scout.initialize`. On background-to-active transitions, a `warm`
+  `app_startup` span is emitted with duration measured to the next animation
+  frame. Both carry `app.startup.type` (`cold` | `warm`) and
+  `app.startup.duration_seconds`.
+
 ## [0.1.6] - 2026-05-22
 
 ### Changed

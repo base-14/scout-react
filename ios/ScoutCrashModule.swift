@@ -2,6 +2,22 @@ import ExpoModulesCore
 import Foundation
 import MetricKit
 import UIKit
+import Darwin
+
+private func scoutProcessStartTimeMillis() -> Double {
+  var info = kinfo_proc()
+  var size = MemoryLayout<kinfo_proc>.stride
+  var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+  let result = mib.withUnsafeMutableBufferPointer { ptr -> Int32 in
+    sysctl(ptr.baseAddress, u_int(ptr.count), &info, &size, nil, 0)
+  }
+  if result == 0 {
+    let sec = Double(info.kp_proc.p_starttime.tv_sec)
+    let usec = Double(info.kp_proc.p_starttime.tv_usec)
+    return sec * 1000.0 + usec / 1000.0
+  }
+  return Date().timeIntervalSince1970 * 1000.0
+}
 
 public class ScoutCrashModule: Module {
   public func definition() -> ModuleDefinition {
@@ -62,6 +78,10 @@ public class ScoutCrashModule: Module {
     
     
     
+    AsyncFunction("getProcessStartTimeMillis") { () -> Double in
+      return scoutProcessStartTimeMillis()
+    }
+
     AsyncFunction("crashNow") { (reason: String?) -> Void in
       let message = reason ?? "synthetic native crash from ScoutCrash.crashNow"
       let exception = NSException(

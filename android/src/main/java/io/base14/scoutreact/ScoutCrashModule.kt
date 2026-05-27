@@ -5,6 +5,8 @@ import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
+import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import expo.modules.kotlin.modules.Module
@@ -50,6 +52,16 @@ class ScoutCrashModule : Module() {
     AsyncFunction("getAccessibilitySnapshot") { ->
       val ctx = appContext.reactContext ?: return@AsyncFunction emptyMap<String, Any>()
       ScoutAccessibilityQueries.snapshot(ctx)
+    }
+
+    AsyncFunction("getProcessStartTimeMillis") { ->
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        val uptimeAtStart = Process.getStartUptimeMillis()
+        val bootEpoch = System.currentTimeMillis() - SystemClock.uptimeMillis()
+        (bootEpoch + uptimeAtStart).toDouble()
+      } else {
+        System.currentTimeMillis().toDouble()
+      }
     }
   }
 }
