@@ -28,21 +28,29 @@ describe('Scout.commonAttributes', () => {
     expect(attrs[ATTR.SESSION_ID]).toMatch(/^[0-9a-f-]{36}$/i);
     expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBe('unknown');
   });
-  it('includes enduser.id and enduser.* attrs once setUser is called', async () => {
+  it('includes user.id and user.* attrs once setUser is called', async () => {
     const s = await makeScout();
     s.setUser('u-123', { email: 'a@b.c', plan: 'pro' });
     const attrs = s.commonAttributes();
-    expect(attrs[ATTR.ENDUSER_ID]).toBe('u-123');
-    expect(attrs['enduser.email']).toBe('a@b.c');
-    expect(attrs['enduser.plan']).toBe('pro');
+    expect(attrs[ATTR.USER_ID]).toBe('u-123');
+    expect(attrs['user.email']).toBe('a@b.c');
+    expect(attrs['user.plan']).toBe('pro');
+  });
+  it('passes through user attrs already prefixed with user.', async () => {
+    const s = await makeScout();
+    s.setUser('u-1', { 'user.email': 'a@b.c', plan: 'pro' });
+    const attrs = s.commonAttributes();
+    expect(attrs['user.email']).toBe('a@b.c');
+    expect(attrs['user.user.email']).toBeUndefined();
+    expect(attrs['user.plan']).toBe('pro');
   });
   it('drops user attrs after clearUser', async () => {
     const s = await makeScout();
     s.setUser('u-1', { email: 'a@b.c' });
     s.clearUser();
     const attrs = s.commonAttributes();
-    expect(attrs[ATTR.ENDUSER_ID]).toBeUndefined();
-    expect(attrs['enduser.email']).toBeUndefined();
+    expect(attrs[ATTR.USER_ID]).toBeUndefined();
+    expect(attrs['user.email']).toBeUndefined();
   });
   it('lifts runtime attrs (battery, etc.) into common attrs', async () => {
     const s = await makeScout();

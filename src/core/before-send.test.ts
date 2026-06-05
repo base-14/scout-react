@@ -13,9 +13,9 @@ describe('applyBeforeSend', () => {
   });
   it('passes type and name into the callback for filtering', () => {
     const cb = vi.fn((e) => e);
-    applyBeforeSend(cb, 'log', 'login', { 'enduser.id': 'u1' });
+    applyBeforeSend(cb, 'log', 'login', { 'user.id': 'u1' });
     expect(cb).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', name: 'login', 'enduser.id': 'u1' }),
+      expect.objectContaining({ type: 'log', name: 'login', 'user.id': 'u1' }),
     );
   });
   it('strips reserved type and name fields from returned attributes', () => {

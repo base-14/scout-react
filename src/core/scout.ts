@@ -89,6 +89,7 @@ export class Scout {
     this.session = new SessionManager(platform, {
       timeoutMinutes: this._config.sessionTimeoutMinutes,
       sampleRate: this._config.sessionSampleRate,
+      maxDurationMinutes: this._config.maxSessionDurationMinutes,
     });
     this.breadcrumbs = new BreadcrumbManager(platform);
   }
@@ -215,12 +216,12 @@ export class Scout {
     const sid = this.session.sessionId;
     if (sid) attrs[ATTR.SESSION_ID] = sid;
     const uid = this.user.id;
-    if (uid) attrs[ATTR.ENDUSER_ID] = uid;
+    if (uid) attrs[ATTR.USER_ID] = uid;
     for (const [k, v] of Object.entries(this.user.attributes)) {
-      attrs[`enduser.${k}`] = v;
+      attrs[k.startsWith('user.') ? k : `user.${k}`] = v;
     }
     const anon = this._anonymousId;
-    if (anon) attrs[ATTR.ENDUSER_ANONYMOUS_ID] = anon;
+    if (anon) attrs[ATTR.USER_ANONYMOUS_ID] = anon;
     return attrs;
   }
   private _anonymousId: string | null = null;

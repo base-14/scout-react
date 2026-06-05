@@ -29,6 +29,7 @@ export interface ScoutConfig {
   anrThresholdMs?: number;
   sessionSampleRate?: number;
   sessionTimeoutMinutes?: number;
+  maxSessionDurationMinutes?: number;
   alwaysCaptureErrors?: boolean;
   firstPartyHosts?: Array<string | RegExp>;
   ignoreUrlPatterns?: RegExp[];
@@ -131,6 +132,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     anrThresholdMs,
     sessionSampleRate,
     sessionTimeoutMinutes: config.sessionTimeoutMinutes ?? 30,
+    maxSessionDurationMinutes: Math.max(0, config.maxSessionDurationMinutes ?? 60),
     alwaysCaptureErrors: config.alwaysCaptureErrors ?? true,
     firstPartyHosts: config.firstPartyHosts,
     ignoreUrlPatterns: config.ignoreUrlPatterns,

@@ -110,4 +110,59 @@ describe('SessionManager', () => {
     expect(rotated).toBe(false);
     expect(mgr.sessionId).toBe(before);
   });
+  it('rotates on sessionId read after maxDurationMinutes lifetime', async () => {
+    const mgr = new SessionManager(memoryPlatform(), {
+      timeoutMinutes: 30,
+      sampleRate: 100,
+      maxDurationMinutes: 60,
+    });
+    await mgr.start();
+    const before = mgr.sessionId;
+    vi.setSystemTime(new Date('2026-01-01T01:01:00Z'));
+    const after = mgr.sessionId;
+    expect(after).not.toBe(before);
+  });
+  it('maxDurationMinutes=0 disables the lifetime cap', async () => {
+    const mgr = new SessionManager(memoryPlatform(), {
+      timeoutMinutes: 30,
+      sampleRate: 100,
+      maxDurationMinutes: 0,
+    });
+    await mgr.start();
+    const before = mgr.sessionId;
+    vi.setSystemTime(new Date('2026-01-01T10:00:00Z'));
+    expect(mgr.sessionId).toBe(before);
+  });
+  it('rotate() resets startedAt so a fresh session lives the full lifetime', async () => {
+    const mgr = new SessionManager(memoryPlatform(), {
+      timeoutMinutes: 30,
+      sampleRate: 100,
+      maxDurationMinutes: 60,
+    });
+    await mgr.start();
+    vi.setSystemTime(new Date('2026-01-01T00:30:00Z'));
+    const rotated = await mgr.rotate();
+    vi.setSystemTime(new Date('2026-01-01T01:20:00Z'));
+    expect(mgr.sessionId).toBe(rotated);
+    vi.setSystemTime(new Date('2026-01-01T01:31:00Z'));
+    expect(mgr.sessionId).not.toBe(rotated);
+  });
+  it('start() rotates a persisted session that exceeded maxDurationMinutes', async () => {
+    const platform = memoryPlatform();
+    const a = new SessionManager(platform, {
+      timeoutMinutes: 30,
+      sampleRate: 100,
+      maxDurationMinutes: 60,
+    });
+    await a.start();
+    const firstId = a.sessionId;
+    vi.setSystemTime(new Date('2026-01-01T01:05:00Z'));
+    const b = new SessionManager(platform, {
+      timeoutMinutes: 30,
+      sampleRate: 100,
+      maxDurationMinutes: 60,
+    });
+    await b.start();
+    expect(b.sessionId).not.toBe(firstId);
+  });
 });

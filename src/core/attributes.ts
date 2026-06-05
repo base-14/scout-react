@@ -1,8 +1,8 @@
 export const ATTR = {
   SESSION_ID: 'session.id',
   SESSION_TYPE: 'session.type',
-  ENDUSER_ID: 'enduser.id',
-  ENDUSER_ANONYMOUS_ID: 'enduser.anonymous_id',
+  USER_ID: 'user.id',
+  USER_ANONYMOUS_ID: 'user.anonymous_id',
   ACCOUNT_ID: 'account.id',
   ACCOUNT_NAME: 'account.name',
   APPLICATION_ID: 'application.id',

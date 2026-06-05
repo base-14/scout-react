@@ -5,7 +5,8 @@ import { METRIC } from './metrics';
 describe('attribute / span / metric name contract', () => {
   it('keeps semantic attribute keys stable', () => {
     expect(ATTR.SESSION_ID).toBe('session.id');
-    expect(ATTR.ENDUSER_ID).toBe('enduser.id');
+    expect(ATTR.USER_ID).toBe('user.id');
+    expect(ATTR.USER_ANONYMOUS_ID).toBe('user.anonymous_id');
     expect(ATTR.SCREEN_NAME).toBe('screen.name');
     expect(ATTR.HTTP_METHOD).toBe('http.method');
     expect(ATTR.HTTP_URL).toBe('http.url');

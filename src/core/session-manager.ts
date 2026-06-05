@@ -10,15 +10,18 @@ interface PersistedSession {
 export class SessionManager {
   private current: PersistedSession | null = null;
   private timeoutMs: number;
+  private maxDurationMs: number;
   private sampleRate: number;
   constructor(
     private platform: PlatformAdapter,
     opts: {
       timeoutMinutes: number;
       sampleRate: number;
+      maxDurationMinutes?: number;
     },
   ) {
     this.timeoutMs = opts.timeoutMinutes * 60 * 1000;
+    this.maxDurationMs = Math.max(0, opts.maxDurationMinutes ?? 0) * 60 * 1000;
     this.sampleRate = opts.sampleRate;
   }
   async start(): Promise<void> {
@@ -27,7 +30,10 @@ export class SessionManager {
       try {
         const parsed = JSON.parse(raw) as PersistedSession;
         const now = Date.now();
-        if (now - parsed.lastActiveAt < this.timeoutMs) {
+        const withinIdle = now - parsed.lastActiveAt < this.timeoutMs;
+        const withinLifetime =
+          this.maxDurationMs === 0 || now - parsed.startedAt < this.maxDurationMs;
+        if (withinIdle && withinLifetime) {
           parsed.lastActiveAt = now;
           this.current = parsed;
           await this.persist();
@@ -48,6 +54,14 @@ export class SessionManager {
     };
   }
   get sessionId(): string | null {
+    if (
+      this.current &&
+      this.maxDurationMs > 0 &&
+      Date.now() - this.current.startedAt >= this.maxDurationMs
+    ) {
+      this.current = this.create();
+      void this.persist();
+    }
     return this.current?.id ?? null;
   }
   get isSampled(): boolean {

@@ -18,7 +18,22 @@ describe('resolveConfig', () => {
     expect(r.captureConsole).toBe(false);
     expect(r.sessionSampleRate).toBe(1);
     expect(r.sessionTimeoutMinutes).toBe(30);
+    expect(r.maxSessionDurationMinutes).toBe(60);
     expect(r.alwaysCaptureErrors).toBe(true);
+  });
+  it('clamps maxSessionDurationMinutes to a 0 floor (negatives disable)', () => {
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', maxSessionDurationMinutes: -5 })
+        .maxSessionDurationMinutes,
+    ).toBe(0);
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', maxSessionDurationMinutes: 0 })
+        .maxSessionDurationMinutes,
+    ).toBe(0);
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', maxSessionDurationMinutes: 120 })
+        .maxSessionDurationMinutes,
+    ).toBe(120);
   });
   it('clamps longTaskThresholdMs to a 20ms floor', () => {
     const r = resolveConfig({
