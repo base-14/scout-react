@@ -32,18 +32,19 @@ export function ScoutTouchBoundary({ children }: ScoutTouchBoundaryProps) {
             [ATTR.USER_INTERACTION_TARGET_TYPE]: typeName,
             [ATTR.USER_INTERACTION_TARGET_NAME_SOURCE]: source,
             [ATTR.USER_INTERACTION_TARGET_PERMANENT_ID]: targetPermanentId(target),
-            ...(typeof ne?.locationX === 'number'
-              ? { [ATTR.USER_INTERACTION_TARGET_X]: Math.round(ne.locationX) }
-              : {}),
-            ...(typeof ne?.locationY === 'number'
-              ? { [ATTR.USER_INTERACTION_TARGET_Y]: Math.round(ne.locationY) }
-              : {}),
+            [ATTR.USER_INTERACTION_TARGET_X]:
+              typeof ne?.locationX === 'number' ? Math.round(ne.locationX) : 0,
+            [ATTR.USER_INTERACTION_TARGET_Y]:
+              typeof ne?.locationY === 'number' ? Math.round(ne.locationY) : 0,
             ...Scout.instance.commonAttributes(),
           });
           Scout.instance?.addBreadcrumb(
             BREADCRUMB_TYPE.TAP,
             `${typeName}: ${description}`,
           );
+          try {
+            Scout.instance?.markInteraction(null);
+          } catch {}
         } catch {}
         return false;
       },
@@ -56,6 +57,18 @@ function describeTouchTarget(target: any): {
   source: string;
 } {
   if (!target) return { description: 'unknown', source: 'blank' };
+  try {
+    const Scout = require('./index').Scout;
+    const resolver = Scout.instance?.config?.customTargetResolver;
+    if (typeof resolver === 'function') {
+      const info = resolver(target);
+      if (info && typeof info.elementName === 'string' && info.elementName) {
+        if (!info.searchForBetter && !info.searchForText) {
+          return { description: info.elementName, source: 'custom_resolver' };
+        }
+      }
+    }
+  } catch {}
   let cur: any = target;
   let depth = 0;
   let firstStringChild: string | null = null;

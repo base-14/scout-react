@@ -39,6 +39,19 @@ export function installNativeNavigationTracker(
       BREADCRUMB_TYPE.VIEW_SESSION,
       `exited: ${currentScreen} (${Math.round(elapsed * 1000)}ms)`,
     );
+    const interaction = scout.consumeInteractionForInv?.();
+    if (interaction) {
+      const invMs = Date.now() - interaction.at;
+      scout.emitSpan(SPAN.APP_VITAL, {
+        [ATTR.VITAL_NAME]: 'inv',
+        [ATTR.VITAL_TYPE]: 'navigation',
+        [ATTR.VITAL_DURATION]: invMs / 1000,
+        [ATTR.VITAL_DURATION_MS]: invMs,
+        [ATTR.VITAL_FROM_SCREEN]: interaction.fromScreen ?? currentScreen,
+        [ATTR.VITAL_TO_SCREEN]: next,
+        ...scout.commonAttributes(),
+      });
+    }
     previousScreen = currentScreen;
     currentScreen = next;
     enterAt = Date.now();

@@ -6,4 +6,10 @@ export interface PlatformAdapter {
   collectResourceAttributes(): Promise<Record<string, string | number | boolean>>;
   getConnectionType(): string;
   onConnectivityChange?(handler: (type: string) => void): () => void;
+  readAppVersion?(): Promise<string | null>;
+  readAppMetadata?(): Promise<{
+    version: string | null;
+    build: string | null;
+    bundleId: string | null;
+  }>;
 }

@@ -41,12 +41,12 @@ describe('BreadcrumbManager', () => {
     expect(crumbs[0]?.message).toBe('pressed Add to cart');
     expect(crumbs[0]?.time).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
-  it('caps the buffer at 20 entries (FIFO eviction)', () => {
-    for (let i = 0; i < 25; i++) mgr.add('navigation', `crumb-${i}`);
+  it('caps the buffer at 100 entries (FIFO eviction)', () => {
+    for (let i = 0; i < 105; i++) mgr.add('navigation', `crumb-${i}`);
     const crumbs = mgr.list();
-    expect(crumbs).toHaveLength(20);
+    expect(crumbs).toHaveLength(100);
     expect(crumbs[0]?.message).toBe('crumb-5');
-    expect(crumbs[19]?.message).toBe('crumb-24');
+    expect(crumbs[99]?.message).toBe('crumb-104');
   });
   it('serializes to JSON', () => {
     mgr.add('tap', 'one');
@@ -69,5 +69,16 @@ describe('BreadcrumbManager', () => {
     mgr.add('navigation', 'two');
     mgr.clear();
     expect(mgr.list()).toEqual([]);
+  });
+  it('pushes the serialized trail to the native sink on each add', () => {
+    const calls: string[] = [];
+    mgr.setNativeSink((json) => calls.push(json));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe('[]');
+    mgr.add('tap', 'one');
+    expect(calls).toHaveLength(2);
+    const trail = JSON.parse(calls[1] ?? '[]');
+    expect(trail).toHaveLength(1);
+    expect(trail[0].type).toBe('tap');
   });
 });

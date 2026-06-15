@@ -97,15 +97,17 @@ function emitTapSpan(
     [ATTR.USER_INTERACTION_TARGET_TYPE]: typeName,
     [ATTR.USER_INTERACTION_TARGET_NAME_SOURCE]: source,
     [ATTR.USER_INTERACTION_TARGET_PERMANENT_ID]: inst ? targetPermanentId(inst) : '',
-    ...(typeof ne?.locationX === 'number'
-      ? { [ATTR.USER_INTERACTION_TARGET_X]: Math.round(ne.locationX) }
-      : {}),
-    ...(typeof ne?.locationY === 'number'
-      ? { [ATTR.USER_INTERACTION_TARGET_Y]: Math.round(ne.locationY) }
-      : {}),
+    [ATTR.USER_INTERACTION_TARGET_X]:
+      typeof ne?.locationX === 'number' ? Math.round(ne.locationX) : 0,
+    [ATTR.USER_INTERACTION_TARGET_Y]:
+      typeof ne?.locationY === 'number' ? Math.round(ne.locationY) : 0,
     ...scout.commonAttributes(),
   });
   scout.addBreadcrumb(BREADCRUMB_TYPE.TAP, `${typeName}: ${description}`);
+  try {
+    const screen = (scout as any)._runtimeAttrs?.[ATTR.SCREEN_NAME] as string | undefined;
+    scout.markInteraction(screen ?? null);
+  } catch {}
 }
 function resolveTargetName(targetNode: any): {
   description: string;

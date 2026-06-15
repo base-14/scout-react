@@ -57,8 +57,17 @@ export class NativePlatform implements PlatformAdapter {
   }
   async collectResourceAttributes(): Promise<Record<string, string | number | boolean>> {
     const attrs: Record<string, string | number | boolean> = {};
+    attrs[ATTR.NETWORK_CONNECTION_TYPE] = this.connectionType;
     if (RN?.Platform) {
-      attrs[ATTR.OS_NAME] = String(RN.Platform.OS);
+      const osMap: Record<string, string> = {
+        ios: 'iOS',
+        android: 'Android',
+        macos: 'macOS',
+        windows: 'Windows',
+        web: 'web',
+      };
+      const rawOs = String(RN.Platform.OS);
+      attrs[ATTR.OS_NAME] = osMap[rawOs] ?? rawOs;
       if (RN.Platform.Version != null) {
         const v = String(RN.Platform.Version);
         attrs[ATTR.OS_VERSION] = v;
@@ -75,7 +84,19 @@ export class NativePlatform implements PlatformAdapter {
         try {
           const abis = await DeviceInfo.supportedAbis?.();
           if (Array.isArray(abis) && abis[0]) {
-            attrs[ATTR.DEVICE_ARCHITECTURE] = String(abis[0]);
+            attrs[ATTR.DEVICE_ARCHITECTURE] = normalizeArch(String(abis[0]));
+          }
+        } catch {}
+        try {
+          const buildNum = await DeviceInfo.getSystemBuildId?.();
+          if (typeof buildNum === 'string' && buildNum) {
+            attrs[ATTR.OS_BUILD] = buildNum;
+          }
+        } catch {}
+        try {
+          const machine = await DeviceInfo.getDeviceId?.();
+          if (typeof machine === 'string' && machine) {
+            attrs[ATTR.DEVICE_NAME] = machine;
           }
         } catch {}
         try {
@@ -102,7 +123,7 @@ export class NativePlatform implements PlatformAdapter {
       if (intl?.resolvedOptions) {
         const opts = intl.resolvedOptions();
         if (opts.locale) attrs[ATTR.DEVICE_LOCALE] = String(opts.locale);
-        if (opts.timeZone) attrs[ATTR.DEVICE_TIME_ZONE] = String(opts.timeZone);
+        if (opts.timeZone) attrs[ATTR.DEVICE_TIMEZONE] = String(opts.timeZone);
       }
     } catch {}
     try {
@@ -150,6 +171,32 @@ export class NativePlatform implements PlatformAdapter {
   }
   getConnectionType(): string {
     return this.connectionType;
+  }
+  async readAppVersion(): Promise<string | null> {
+    if (!DeviceInfo) return null;
+    try {
+      const v = String((await DeviceInfo.getVersion?.()) ?? '').trim();
+      if (!v) return null;
+      const b = String((await DeviceInfo.getBuildNumber?.()) ?? '').trim();
+      return b ? `${v}+${b}` : v;
+    } catch {
+      return null;
+    }
+  }
+  async readAppMetadata(): Promise<{
+    version: string | null;
+    build: string | null;
+    bundleId: string | null;
+  }> {
+    if (!DeviceInfo) return { version: null, build: null, bundleId: null };
+    try {
+      const version = String((await DeviceInfo.getVersion?.()) ?? '').trim() || null;
+      const build = String((await DeviceInfo.getBuildNumber?.()) ?? '').trim() || null;
+      const bundleId = String((await DeviceInfo.getBundleId?.()) ?? '').trim() || null;
+      return { version, build, bundleId };
+    } catch {
+      return { version: null, build: null, bundleId: null };
+    }
   }
   onConnectivityChange(handler: (type: string) => void): () => void {
     return this._onConnectivityChange(handler);
@@ -200,6 +247,14 @@ async function readBattery(): Promise<{
     } catch {}
   }
   return { level: null, state: null };
+}
+function normalizeArch(raw: string): string {
+  const s = raw.toLowerCase();
+  if (s.startsWith('arm64') || s === 'arm64-v8a' || s === 'arm64e') return 'arm64';
+  if (s.startsWith('armeabi') || s === 'arm32' || s === 'armv7') return 'arm32';
+  if (s === 'x86_64' || s === 'amd64') return 'amd64';
+  if (s === 'x86' || s === 'i386' || s === 'ia32') return 'x86';
+  return s;
 }
 function mapExpoBatteryState(raw: unknown): string | null {
   switch (raw) {

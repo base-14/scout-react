@@ -1,4 +1,10 @@
 import type { Attributes, BeforeSendCallback } from './types';
+export interface CustomTargetInfo {
+  elementName: string;
+  searchForBetter?: boolean;
+  searchForText?: boolean;
+}
+export type CustomTargetResolver = (node: unknown) => CustomTargetInfo | null;
 export interface ScoutConfig {
   serviceName: string;
   endpoint: string;
@@ -27,6 +33,7 @@ export interface ScoutConfig {
   capturePrintStatements?: boolean;
   longTaskThresholdMs?: number;
   anrThresholdMs?: number;
+  iosHangThresholdMs?: number;
   sessionSampleRate?: number;
   sessionTimeoutMinutes?: number;
   maxSessionDurationMinutes?: number;
@@ -35,6 +42,7 @@ export interface ScoutConfig {
   ignoreUrlPatterns?: RegExp[];
   maxOfflineStorageMb?: number;
   beforeSend?: BeforeSendCallback;
+  customTargetResolver?: CustomTargetResolver;
   traceExportIntervalMs?: number;
   traceMaxQueueSize?: number;
   traceMaxExportBatchSize?: number;
@@ -80,6 +88,7 @@ export interface ResolvedConfig extends Required<
     | 'firstPartyHosts'
     | 'ignoreUrlPatterns'
     | 'beforeSend'
+    | 'customTargetResolver'
     | 'applicationId'
     | 'buildId'
     | 'exportRetry'
@@ -92,6 +101,7 @@ export interface ResolvedConfig extends Required<
   firstPartyHosts?: Array<string | RegExp>;
   ignoreUrlPatterns?: RegExp[];
   beforeSend?: BeforeSendCallback;
+  customTargetResolver?: CustomTargetResolver;
   applicationId?: string;
   buildId?: string;
   exportRetry: ResolvedRetry;
@@ -100,6 +110,8 @@ export interface ResolvedConfig extends Required<
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
   const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
   const anrThresholdMs = Math.max(1000, config.anrThresholdMs ?? 5000);
+  const iosHangRaw = config.iosHangThresholdMs ?? 250;
+  const iosHangThresholdMs = iosHangRaw <= 0 ? 0 : Math.max(50, iosHangRaw);
   const sessionSampleRate = clamp(config.sessionSampleRate ?? 1, 0, 100);
   const captureConsole = config.captureConsole ?? config.capturePrintStatements ?? false;
   return {
@@ -130,6 +142,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     capturePrintStatements: captureConsole,
     longTaskThresholdMs,
     anrThresholdMs,
+    iosHangThresholdMs,
     sessionSampleRate,
     sessionTimeoutMinutes: config.sessionTimeoutMinutes ?? 30,
     maxSessionDurationMinutes: Math.max(0, config.maxSessionDurationMinutes ?? 60),
@@ -138,6 +151,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     ignoreUrlPatterns: config.ignoreUrlPatterns,
     maxOfflineStorageMb: config.maxOfflineStorageMb ?? 5,
     beforeSend: config.beforeSend,
+    customTargetResolver: config.customTargetResolver,
     traceExportIntervalMs: config.traceExportIntervalMs ?? 5000,
     traceMaxQueueSize: config.traceMaxQueueSize ?? 2048,
     traceMaxExportBatchSize: config.traceMaxExportBatchSize ?? 512,

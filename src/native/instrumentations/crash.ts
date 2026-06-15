@@ -25,7 +25,7 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
           [ATTR.CRASH_STARTED_AT]: prev.startedAt,
           [ATTR.CRASH_TIMESTAMP]: new Date().toISOString(),
           [ATTR.CRASH_STATUS]: 'session_marker',
-          [ATTR.CRASH_LAST_SCREEN]: prev.lastScreen,
+          [ATTR.CRASH_LAST_SCREEN]: prev.lastScreen || lastScreenFromBreadcrumbs(scout),
           [ATTR.CRASH_TYPE]: 'unclean_termination',
           [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serialize(),
           ...scout.commonAttributes(),
@@ -39,8 +39,8 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
         MARKER_KEY,
         JSON.stringify({
           sessionId: scout.sessionId ?? 'unknown',
-          startedAt: new Date().toISOString(),
-          lastScreen: '',
+          startedAt: scout.sessionManager.startedAtIso ?? new Date().toISOString(),
+          lastScreen: lastScreenFromBreadcrumbs(scout),
           active,
         } satisfies Marker),
       );
@@ -59,4 +59,20 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
       else AppState.removeEventListener?.('change', onChange);
     } catch {}
   };
+}
+function lastScreenFromBreadcrumbs(scout: Scout): string {
+  try {
+    const crumbs = JSON.parse(scout.breadcrumbsManager.serialize()) as Array<{
+      type?: string;
+      message?: string;
+    }>;
+    for (let i = crumbs.length - 1; i >= 0; i--) {
+      const c = crumbs[i];
+      if (c?.type === 'navigation' && typeof c.message === 'string') {
+        const m = c.message.match(/screen:\s*(.+)/);
+        if (m && m[1]) return m[1];
+      }
+    }
+  } catch {}
+  return '';
 }

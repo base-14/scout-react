@@ -21,6 +21,23 @@ describe('resolveConfig', () => {
     expect(r.maxSessionDurationMinutes).toBe(60);
     expect(r.alwaysCaptureErrors).toBe(true);
   });
+  it('clamps iosHangThresholdMs (0 disables, otherwise 50ms floor, default 250)', () => {
+    expect(resolveConfig({ serviceName: 's', endpoint: 'e' }).iosHangThresholdMs).toBe(
+      250,
+    );
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', iosHangThresholdMs: 0 })
+        .iosHangThresholdMs,
+    ).toBe(0);
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', iosHangThresholdMs: 10 })
+        .iosHangThresholdMs,
+    ).toBe(50);
+    expect(
+      resolveConfig({ serviceName: 's', endpoint: 'e', iosHangThresholdMs: 500 })
+        .iosHangThresholdMs,
+    ).toBe(500);
+  });
   it('clamps maxSessionDurationMinutes to a 0 floor (negatives disable)', () => {
     expect(
       resolveConfig({ serviceName: 's', endpoint: 'e', maxSessionDurationMinutes: -5 })

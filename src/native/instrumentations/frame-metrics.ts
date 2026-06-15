@@ -57,14 +57,20 @@ export function installNativeFrameMetricsTracker(
             [ATTR.LONG_TASK_THRESHOLD]: longTaskThresholdMs / 1000,
             ...scout.commonAttributes(),
           });
-          scout.addBreadcrumb(BREADCRUMB_TYPE.LONG_TASK, `${Math.round(delta)}ms`);
+          scout.addBreadcrumb(
+            BREADCRUMB_TYPE.LONG_TASK,
+            `Long task: ${Math.round(delta)}ms`,
+          );
           if (delta >= FROZEN_FRAME_MS) {
             frozenMsInWindow += delta;
             scout.emitSpan(SPAN.FROZEN_FRAME, {
               [ATTR.FROZEN_FRAME_DURATION]: seconds,
               ...scout.commonAttributes(),
             });
-            scout.addBreadcrumb(BREADCRUMB_TYPE.FROZEN_FRAME, `${Math.round(delta)}ms`);
+            scout.addBreadcrumb(
+              BREADCRUMB_TYPE.FROZEN_FRAME,
+              `Frozen frame: ${Math.round(delta)}ms`,
+            );
           }
         }
       }

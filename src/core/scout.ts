@@ -22,6 +22,22 @@ import type { Attributes, AttributeValue, SeverityText } from './types';
 import { SCOPE_NAME, SCOPE_VERSION } from './scope';
 import { uuidv4 } from './uuid';
 const MAX_STACK_LEN = 8000;
+function errorFingerprint(type: string, message: string, stack: string): string {
+  const firstFrame =
+    (stack ?? '').split('\n').find((l) => /[\s(]at\s|^\s*at\s/.test(l)) ?? '';
+  const seed = `${type}|${message}|${firstFrame.trim()}`;
+  let h = 5381;
+  for (let i = 0; i < seed.length; i++) {
+    h = ((h << 5) + h) ^ seed.charCodeAt(i);
+  }
+  let h2 = 52711;
+  for (let i = 0; i < seed.length; i++) {
+    h2 = ((h2 << 5) + h2) ^ seed.charCodeAt(i);
+  }
+  const a = (h >>> 0).toString(16).padStart(4, '0').slice(-4);
+  const b = (h2 >>> 0).toString(16).padStart(4, '0').slice(-4);
+  return `${a}${b}`;
+}
 function detectSourceType(): string {
   const g: any = globalThis as any;
   if (typeof g.document !== 'undefined') return 'browser';
@@ -160,6 +176,9 @@ export class Scout {
   get userAttributes(): Readonly<Attributes> {
     return this.user.attributes;
   }
+  get anonymousId(): string | null {
+    return this._anonymousId;
+  }
   get connectionType(): string {
     return this._connectionType;
   }
@@ -207,14 +226,34 @@ export class Scout {
     return span;
   }
   private readonly _appStartedAt = Date.now();
+  private _lastInteractionAt: number = 0;
+  private _lastInteractionScreen: string | null = null;
+  markInteraction(screen?: string | null): void {
+    this._lastInteractionAt = Date.now();
+    this._lastInteractionScreen = screen ?? this._lastInteractionScreen;
+  }
+  consumeInteractionForInv(maxWindowMs: number = 5000): {
+    at: number;
+    fromScreen: string | null;
+  } | null {
+    if (this._lastInteractionAt === 0) return null;
+    const age = Date.now() - this._lastInteractionAt;
+    if (age > maxWindowMs) return null;
+    const out = { at: this._lastInteractionAt, fromScreen: this._lastInteractionScreen };
+    this._lastInteractionAt = 0;
+    this._lastInteractionScreen = null;
+    return out;
+  }
   commonAttributes(): Attributes {
     const attrs: Attributes = {
-      [ATTR.NETWORK_CONNECTION_TYPE]: this._connectionType,
       [ATTR.SESSION_TYPE]: 'user',
+      [ATTR.SESSION_SAMPLE_RATE]: String(this.session.configuredSampleRate),
       ...this._runtimeAttrs,
     };
     const sid = this.session.sessionId;
     if (sid) attrs[ATTR.SESSION_ID] = sid;
+    const startIso = this.session.startedAtIso;
+    if (startIso) attrs[ATTR.SESSION_START_TIME] = startIso;
     const uid = this.user.id;
     if (uid) attrs[ATTR.USER_ID] = uid;
     for (const [k, v] of Object.entries(this.user.attributes)) {
@@ -290,11 +329,12 @@ export class Scout {
     const attrs: Attributes = {
       [ATTR.VITAL_NAME]: name,
       [ATTR.VITAL_TYPE]: 'duration',
-      [ATTR.VITAL_DURATION_NS]: durationMs * 1000000,
+      [ATTR.VITAL_DURATION]: durationMs / 1000,
+      [ATTR.VITAL_DURATION_MS]: durationMs,
       ...this.commonAttributes(),
     };
     if (v.description) attrs[ATTR.VITAL_DESCRIPTION] = v.description;
-    this.emitSpan(SPAN.CUSTOM_VITAL, attrs);
+    this.emitSpan(SPAN.APP_VITAL, attrs);
   }
   recordOperationStep(
     name: string,
@@ -375,7 +415,8 @@ export class Scout {
     };
     if (opts?.library) attrs[ATTR.ERROR_LIBRARY] = opts.library;
     if (opts?.componentStack) attrs[ATTR.ERROR_COMPONENT_STACK] = opts.componentStack;
-    if (opts?.fingerprint) attrs[ATTR.ERROR_FINGERPRINT] = opts.fingerprint;
+    attrs[ATTR.ERROR_FINGERPRINT] =
+      opts?.fingerprint ?? errorFingerprint('manual_error', message, stack);
     if (opts?.category) attrs[ATTR.ERROR_CATEGORY] = opts.category;
     const causes = extractErrorCauses(error);
     if (causes.length > 0) {
@@ -410,6 +451,7 @@ export class Scout {
     if (causes.length > 0) {
       attrs[ATTR.ERROR_CAUSES_JSON] = JSON.stringify(causes).slice(0, 4000);
     }
+    attrs[ATTR.ERROR_FINGERPRINT] = errorFingerprint('uncaught_error', message, stack);
     this.emitSpan(SPAN.ERROR, attrs, { status: SpanStatusCode.ERROR });
     this.errorCounter?.add(1, { handled: 'false' });
     this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, message);
@@ -446,6 +488,9 @@ export class Scout {
       this._config.alwaysCaptureErrors && ERROR_CLASS_SPANS.has(name);
     if (!opts.forceSample && !bypassForErrors && !this.session.isSampled) {
       return null;
+    }
+    if (bypassForErrors && !this.session.isSampled) {
+      attributes = { ...attributes, [ATTR.SESSION_SAMPLED]: 'false' };
     }
     const filtered = applyBeforeSend(this._config.beforeSend, 'span', name, attributes);
     if (!filtered) return null;
@@ -596,12 +641,16 @@ export class Scout {
     });
     if (!filtered) return;
     try {
+      const activeSpan = this._rootSpan
+        ? trace.setSpan(context.active(), this._rootSpan)
+        : context.active();
       this.otelLogger.emit({
         severityNumber: SEVERITY_NUMBER[severity],
         severityText: severity,
         body: filtered.message ?? message,
         attributes: toOtelAttrs(filtered.attributes),
         timestamp: Date.now(),
+        context: activeSpan,
       });
     } catch (e) {
       this.debug('emitLog failed', e);

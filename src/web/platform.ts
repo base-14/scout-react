@@ -21,6 +21,11 @@ export class WebPlatform implements PlatformAdapter {
   }
   async collectResourceAttributes(): Promise<Record<string, string | number | boolean>> {
     const attrs: Record<string, string | number | boolean> = {};
+    attrs[ATTR.NETWORK_CONNECTION_TYPE] = 'unknown';
+    try {
+      const loc = (globalThis as any).location;
+      if (loc?.origin) attrs[ATTR.APP_BUNDLE_ID] = String(loc.origin);
+    } catch {}
     const nav = (globalThis as any).navigator;
     if (!nav) return attrs;
     const ua = nav.userAgentData;
@@ -47,7 +52,7 @@ export class WebPlatform implements PlatformAdapter {
       if (intl?.resolvedOptions) {
         const opts = intl.resolvedOptions();
         if (opts.locale) attrs[ATTR.APPLICATION_LOCALE] = String(opts.locale);
-        if (opts.timeZone) attrs[ATTR.DEVICE_TIME_ZONE] = String(opts.timeZone);
+        if (opts.timeZone) attrs[ATTR.DEVICE_TIMEZONE] = String(opts.timeZone);
       }
     } catch {}
     if (typeof nav.hardwareConcurrency === 'number') {

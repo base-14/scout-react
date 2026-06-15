@@ -8,9 +8,9 @@ describe('attribute / span / metric name contract', () => {
     expect(ATTR.USER_ID).toBe('user.id');
     expect(ATTR.USER_ANONYMOUS_ID).toBe('user.anonymous_id');
     expect(ATTR.SCREEN_NAME).toBe('screen.name');
-    expect(ATTR.HTTP_METHOD).toBe('http.method');
-    expect(ATTR.HTTP_URL).toBe('http.url');
-    expect(ATTR.HTTP_STATUS_CODE).toBe('http.status_code');
+    expect(ATTR.HTTP_METHOD).toBe('http.request.method');
+    expect(ATTR.HTTP_URL).toBe('url.full');
+    expect(ATTR.HTTP_STATUS_CODE).toBe('http.response.status_code');
     expect(ATTR.HTTP_DURATION_MS).toBe('http.duration_ms');
     expect(ATTR.ERROR_TYPE).toBe('error.type');
     expect(ATTR.ERROR_MESSAGE).toBe('error.message');

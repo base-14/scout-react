@@ -7,6 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-15
+
+### Added
+
+- **RUM telemetry-semantics spec compliance.** Every span now carries
+  `session.start_time` (RFC3339+Z, identical for the whole session),
+  `session.sample_rate` (the configured rate as a `LowCardinality(String)` for
+  ClickHouse rollups), and — on error/crash-class spans bypassed from unsampled
+  sessions — `session.sampled = "false"`. Backend distinct counts can now treat
+  per-session rows as sampled population while keeping crash counts
+  population-complete.
+- **`crash.previous_session_id` + `crash.session_started_at` on native crash
+  spans.** New `setSessionContext(sessionId, sessionStartIso)` bridge on both
+  platforms — wired into the NDK signal handler (Android) and KSCrash userInfo
+  (iOS) at init and on every session rotation. On relaunch, the drain code
+  emits the crashed session's id/start_time as `crash.previous_session_id` and
+  `crash.session_started_at` regardless of relaunch delay, so next-launch
+  `native_crash` spans attribute to the correct session.
+- **`crash.last_screen` on `app_crash` spans.** Derived from the most recent
+  `navigation` breadcrumb at drain time (mirroring the existing `native_crash`
+  path), so the JS-side unclean-termination spans surface the screen the user
+  was on when the marker last persisted.
+- **Resource attrs: `app.bundle_id`, `app.version`, `app.build` (split from
+  `service.version`).** `service.version` continues to carry the semver-only
+  build; `app.build` carries the build number; `app.bundle_id` carries the
+  reverse-DNS identifier. Web falls back to `location.origin` for
+  `app.bundle_id`.
+- **Resource attrs: `os.name` normalized to `"iOS"` / `"Android"`,
+  `host.arch` lowercased** (`arm64`, `amd64`) per OTel semconv; new
+  `os.build`, `device.name` resource attrs on both platforms.
+
+### Changed
+
+- **BREAKING (wire format): HTTP semconv migration.** `http.method` →
+  `http.request.method`, `http.url` → `url.full`, `http.status_code` →
+  `http.response.status_code`, `http.response_content_length` →
+  `http.response.body.size`. Matches scout-flutter v0.1.15 and the RUM ClickHouse
+  rollup contract.
+- **Breadcrumb buffer capacity raised from 20 to 100 entries** so the trail
+  surviving a crash carries enough navigation/HTTP/error context for the
+  backend's last-screen and journey reconstruction.
+- **iOS KSCrash `userInfo` is now a thread-safe merged dict** instead of being
+  overwritten on every `setBreadcrumbs` call. Coexisting `scout.breadcrumbs` +
+  `scout.session_id` + `scout.session_started_at` keys are preserved across
+  push events; the drain falls back to parsing KSCrash's `json_data` envelope
+  when the dict exceeds KSCrash's size limit.
+- **`app_crash` marker `startedAt` now reads from the session manager** instead
+  of the marker-write time. Previously, `crash.started_at` on relaunch was the
+  AppState transition time, not the session start — backend joins on
+  `(SessionId, SessionStart)` would mis-attribute.
+
+### Removed
+
+- **`Scout.crashNow()`, `Scout.simulateCrash()`, `Scout.setTestApisEnabled()`,
+  and the `enableTestApis` config flag.** Test-only crash trigger APIs have no
+  place in a production SDK — they're an injection footgun and no commercial
+  RUM provider ships them. Apps that want a "force crash" button can implement
+  it inline in their dev panel via `throw new Error()` /
+  `ErrorUtils.reportFatalError()`. The corresponding native exports
+  (`Java_..._simulateCrash`, `ScoutCrashTestApis.crashNow`,
+  `ScoutNdkSignalHandler.simulateCrash`) are gone.
+
+### Earlier unreleased additions
+
+- **`maxSessionDurationMinutes`** (default `60`). Caps the lifetime of a session.
+  When the lifetime is exceeded the next `sessionId` read rotates to a fresh
+  session. Pass `0` to disable the cap.
+- **`iosHangThresholdMs`** (default `250`, min `50`, `0` disables). Drives a new
+  iOS `AppHangWatchdog` that emits a `ui_hang` span whenever the main thread is
+  blocked past the threshold. The span carries `ui_hang.duration` and
+  `ui_hang.threshold` (seconds) and bypasses session sampling (it's in
+  `ERROR_CLASS_SPANS`). Disabled on Android.
+- **`customTargetResolver`** config hook. Lets the host app override how
+  `ScoutTouchBoundary` describes a tap target — the resolver receives the
+  React fiber/host node and returns `{ elementName, searchForBetter?,
+  searchForText? } | null`. Falls back to the existing fiber walk when the
+  resolver returns null or asks to search further.
+- **Auto-detect `serviceVersion` from the host app.** If `Scout.initialize`
+  isn't given a `serviceVersion`, the SDK reads it from `CFBundleShortVersionString`
+  / `versionName` (via `react-native-device-info`), falling back to `'1.0.0'`.
+- **Breadcrumbs are now persisted into native crash reports.** On iOS the
+  serialized trail is written into `KSCrash.userInfo`; on Android it's pushed
+  into the JNI signal handler via `nativeSetBreadcrumbs`. Pending native crashes
+  emit `crash.breadcrumbs` so the trail survives even when the JS bridge dies.
+- **`UI_HANG` span constant** in `src/core/spans.ts`, added to
+  `ERROR_CLASS_SPANS` so it bypasses session sampling like other error-class
+  spans.
+- **Extensive iOS KSCrash field coverage.** New `crash.*` attributes on
+  KSCrash reports including `crash.os_build`, `crash.boot_time`,
+  `crash.memory_footprint`, `crash.app_transition_state`,
+  `crash.termination_flags/code/namespace/indicator/byProc/byPid`,
+  `crash.thread_count`, `crash.thread_name`, `crash.diagnosis`,
+  `crash.crashing_thread_index`, full `crash.application_stats.*`. Plus
+  drain-time context (`crash.idfv`, `crash.uid`, `crash.gid`,
+  `crash.system_boot_time_iso`, `crash.time_since_boot_secs`,
+  `crash.drain_uptime_secs`, `crash.drain_app_state`, `crash.environment`,
+  `crash.build_configuration`) and sysctl-derived context
+  (`crash.translated` for Rosetta, `crash.parent_pid`,
+  `crash.parent_proc_name`).
+- **Android NDK signal handler now bakes in static context.** Static buffers
+  populated at init via `ScoutNdkSignalHandler.setContextIfLoaded` and
+  `setExtendedContextIfLoaded` emit `crash.device_model`, `crash.os_version`,
+  `crash.os_build`, `crash.application_version`, `crash.bundle_id`,
+  `crash.app_name`, `crash.build_type`, `crash.device_app_hash`,
+  `crash.app_uuid`, `crash.cpu_arch`, `crash.app_in_foreground`, and
+  `crash.app_active` directly into the signal-time JSON.
+
+### Earlier unreleased changes
+
+- **BREAKING (wire format): user attributes moved from `enduser.*` to `user.*`
+  namespace.** `setUser(id, attrs)` API is unchanged, but emitted keys are now
+  `user.id`, `user.anonymous_id`, and `user.<custom>` (auto-prefixed unless the
+  caller already prefixed with `user.`). `ATTR.ENDUSER_ID` /
+  `ATTR.ENDUSER_ANONYMOUS_ID` constants renamed to `ATTR.USER_ID` /
+  `ATTR.USER_ANONYMOUS_ID`. Backend dashboards keyed on `enduser.*` must be
+  updated. `account.*` keys unchanged.
+- **BREAKING (wire format): MetricKit callstack trees are now base64-encoded.**
+  `crash.callstack_tree_json` on `crash.type` `metric_kit` and `metric_kit_hang`
+  reports is now the base64 of the raw `MXCallStackTree.jsonRepresentation()`
+  bytes rather than truncated UTF-8 plaintext. A companion attribute
+  `crash.callstack_tree_encoding = "base64"` flags the new format.
+- **Crash payload truncation caps removed.** `crash.registers_json`,
+  `crash.callstack_tree_json`, `crash.binary_images_json` (iOS KSCrash) and
+  Android `crash.tombstone` from ExitInfo ANR traces now ship full content
+  instead of being truncated to 16KB/32KB.
+
 ## [0.1.8] - 2026-05-27
 
 ### Added

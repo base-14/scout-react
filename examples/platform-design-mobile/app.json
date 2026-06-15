@@ -24,6 +24,10 @@
       "package": "io.base14.platformdesign",
       "usesCleartextTraffic": true
     },
+    "web": {
+      "bundler": "metro"
+    },
+    "platforms": ["ios", "android", "web"],
     "plugins": []
   }
 }

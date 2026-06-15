@@ -1,10 +1,19 @@
 import type { Breadcrumb } from './types';
 import type { PlatformAdapter } from './platform';
-const MAX_BREADCRUMBS = 20;
+const MAX_BREADCRUMBS = 100;
 const STORAGE_KEY = 'scout.breadcrumbs';
 export class BreadcrumbManager {
   private buffer: Breadcrumb[] = [];
+  private nativeSink: ((json: string) => void) | null = null;
   constructor(private platform: PlatformAdapter) {}
+  setNativeSink(sink: ((json: string) => void) | null): void {
+    this.nativeSink = sink;
+    if (sink) {
+      try {
+        sink(this.serialize());
+      } catch {}
+    }
+  }
   async hydrate(): Promise<void> {
     try {
       const raw = await this.platform.getItem(STORAGE_KEY);
@@ -27,6 +36,11 @@ export class BreadcrumbManager {
       this.buffer.shift();
     }
     void this.persist();
+    if (this.nativeSink) {
+      try {
+        this.nativeSink(this.serialize());
+      } catch {}
+    }
   }
   list(): Breadcrumb[] {
     return [...this.buffer];

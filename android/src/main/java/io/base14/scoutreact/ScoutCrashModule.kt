@@ -1,10 +1,14 @@
 package io.base14.scoutreact
 
+import android.app.Activity
 import android.app.ActivityManager
+import android.app.Application
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
@@ -16,6 +20,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.security.MessageDigest
+import java.util.UUID
 
 class ScoutCrashModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -24,16 +30,9 @@ class ScoutCrashModule : Module() {
     OnCreate {
       val ctx = appContext.reactContext ?: return@OnCreate
       ScoutCrashInstaller.installIfNeeded(ctx)
-      
-      
-      
-      
       val dir = java.io.File(ctx.filesDir, "scout-crash/pending").apply { mkdirs() }
       ScoutNdkSignalHandler.installIfNeeded(dir.absolutePath)
-      
-      
-      
-      
+      ScoutNativeContextPusher.install(ctx)
       ScoutExitInfoCollector.drain(ctx, dir)
     }
 
@@ -54,6 +53,19 @@ class ScoutCrashModule : Module() {
       ScoutAccessibilityQueries.snapshot(ctx)
     }
 
+    AsyncFunction("setBreadcrumbs") { json: String ->
+      ScoutNdkSignalHandler.setBreadcrumbsIfLoaded(json)
+    }
+
+    AsyncFunction("notifySessionRotated") { ->
+      ScoutNativeContextPusher.notifySessionRotated()
+    }
+
+    AsyncFunction("setSessionContext") { sessionId: String, sessionStartedAt: String ->
+      ScoutNdkSignalHandler.setSessionContextIfLoaded(sessionId, sessionStartedAt)
+    }
+
+
     AsyncFunction("getProcessStartTimeMillis") { ->
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         val uptimeAtStart = Process.getStartUptimeMillis()
@@ -66,12 +78,223 @@ class ScoutCrashModule : Module() {
   }
 }
 
+private object ScoutNativeContextPusher {
+  private const val PREFS = "scout_crash_state"
+  private const val KEY_APP_UUID = "app_uuid"
+  private const val KEY_LAUNCHES_SINCE_CRASH = "launches_since_last_crash"
+  private const val KEY_SESSIONS_SINCE_CRASH = "sessions_since_last_crash"
+  private const val KEY_ACTIVE_SINCE_CRASH = "active_since_last_crash_secs"
+  private const val KEY_BG_SINCE_CRASH = "bg_since_last_crash_secs"
+  @Volatile private var installed = false
+  @Volatile private var appCtx: Context? = null
+
+  private val activeTimeMs = java.util.concurrent.atomic.AtomicLong(0L)
+  private val backgroundTimeMs = java.util.concurrent.atomic.AtomicLong(0L)
+  private val activeSinceLastCrashMs = java.util.concurrent.atomic.AtomicLong(0L)
+  private val backgroundSinceLastCrashMs = java.util.concurrent.atomic.AtomicLong(0L)
+  private var launchesSinceLastCrash = 0
+  private var sessionsSinceLaunch = 0
+  private var currentlyForeground = false
+  private var lastTransitionElapsedMs = 0L
+
+  fun install(ctx: Context) {
+    if (installed) return
+    installed = true
+    appCtx = ctx.applicationContext
+    try {
+      pushStaticContext(ctx)
+      pushExtendedContext(ctx)
+      primeLaunchCounter(ctx)
+      primeSessionCounters(ctx)
+      registerForegroundTracking(ctx)
+    } catch (_: Throwable) {
+    }
+  }
+
+  fun notifySessionRotated() {
+    val ctx = appCtx ?: return
+    val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val sinceLastCrash = prefs.getInt(KEY_SESSIONS_SINCE_CRASH, 0) + 1
+    prefs.edit().putInt(KEY_SESSIONS_SINCE_CRASH, sinceLastCrash).apply()
+    sessionsSinceLaunch += 1
+    ScoutNdkSignalHandler.setSessionCountersIfLoaded(sessionsSinceLaunch, sinceLastCrash)
+  }
+
+  private fun primeLaunchCounter(ctx: Context) {
+    val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    launchesSinceLastCrash = prefs.getInt(KEY_LAUNCHES_SINCE_CRASH, 0) + 1
+    activeSinceLastCrashMs.set(prefs.getInt(KEY_ACTIVE_SINCE_CRASH, 0).toLong() * 1000L)
+    backgroundSinceLastCrashMs.set(prefs.getInt(KEY_BG_SINCE_CRASH, 0).toLong() * 1000L)
+    prefs.edit().putInt(KEY_LAUNCHES_SINCE_CRASH, launchesSinceLastCrash).apply()
+    pushActivityTimers()
+  }
+
+  private fun primeSessionCounters(ctx: Context) {
+    val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val sinceLastCrash = prefs.getInt(KEY_SESSIONS_SINCE_CRASH, 0) + 1
+    prefs.edit().putInt(KEY_SESSIONS_SINCE_CRASH, sinceLastCrash).apply()
+    sessionsSinceLaunch = 1
+    ScoutNdkSignalHandler.setSessionCountersIfLoaded(sessionsSinceLaunch, sinceLastCrash)
+  }
+
+  private fun pushActivityTimers() {
+    ScoutNdkSignalHandler.setActivityTimersIfLoaded(
+      activeSecs = (activeTimeMs.get() / 1000L).toInt(),
+      backgroundSecs = (backgroundTimeMs.get() / 1000L).toInt(),
+      activeSinceLastCrashSecs = (activeSinceLastCrashMs.get() / 1000L).toInt(),
+      backgroundSinceLastCrashSecs = (backgroundSinceLastCrashMs.get() / 1000L).toInt(),
+      launchesSinceLastCrash = launchesSinceLastCrash,
+    )
+  }
+
+  @Synchronized
+  private fun transitionTo(foreground: Boolean) {
+    val now = SystemClock.elapsedRealtime()
+    val elapsed = (now - lastTransitionElapsedMs).coerceAtLeast(0)
+    if (currentlyForeground) {
+      activeTimeMs.addAndGet(elapsed)
+      activeSinceLastCrashMs.addAndGet(elapsed)
+    } else {
+      backgroundTimeMs.addAndGet(elapsed)
+      backgroundSinceLastCrashMs.addAndGet(elapsed)
+    }
+    appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
+      ?.putInt(KEY_ACTIVE_SINCE_CRASH, (activeSinceLastCrashMs.get() / 1000L).toInt())
+      ?.putInt(KEY_BG_SINCE_CRASH, (backgroundSinceLastCrashMs.get() / 1000L).toInt())
+      ?.apply()
+    currentlyForeground = foreground
+    lastTransitionElapsedMs = now
+    ScoutNdkSignalHandler.setForegroundIfLoaded(foreground, foreground)
+    pushActivityTimers()
+  }
+
+  private fun pushStaticContext(ctx: Context) {
+    val pm = ctx.packageManager
+    val pkg = ctx.packageName ?: ""
+    val info = try { pm.getPackageInfo(pkg, 0) } catch (_: Throwable) { null }
+    val bundleVer = info?.versionName ?: ""
+    val osVer = Build.VERSION.RELEASE ?: ""
+    val osBuild = Build.DISPLAY ?: Build.ID ?: ""
+    val model = Build.MODEL ?: ""
+    val abi = Build.SUPPORTED_ABIS?.firstOrNull() ?: ""
+    val buildType = if ((ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+      "debug"
+    } else {
+      "release"
+    }
+    ScoutNdkSignalHandler.setContextIfLoaded(
+      model = model,
+      osVersion = osVer,
+      osBuild = osBuild,
+      bundleVersion = bundleVer,
+      packageName = pkg,
+      buildType = buildType,
+      abi = abi,
+    )
+  }
+
+  private fun pushExtendedContext(ctx: Context) {
+    val pm = ctx.packageManager
+    val appName = try {
+      pm.getApplicationLabel(ctx.applicationInfo).toString()
+    } catch (_: Throwable) { "" }
+    val deviceAppHash = computeDeviceAppHash(ctx)
+    val appUuid = persistedAppUuid(ctx)
+    val processName = try { readProcSelfCmdline() } catch (_: Throwable) { "" }
+    val appExecutable = ctx.applicationInfo.processName ?: ""
+    val executablePath = ctx.applicationInfo.nativeLibraryDir ?: ""
+    val timeZone = try { java.util.TimeZone.getDefault().id ?: "" } catch (_: Throwable) { "" }
+    val parentPid = try { android.os.Process.myPid() } catch (_: Throwable) { -1 }
+    val parentProcName = ""
+    val appStartTimeSecs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      (System.currentTimeMillis() - SystemClock.uptimeMillis() + android.os.Process.getStartUptimeMillis()) / 1000L
+    } else {
+      System.currentTimeMillis() / 1000L
+    }
+    val systemBootTimeSecs = (System.currentTimeMillis() / 1000L) - (SystemClock.elapsedRealtime() / 1000L)
+    ScoutNdkSignalHandler.setExtendedContextIfLoaded(
+      appName = appName,
+      deviceAppHash = deviceAppHash,
+      appUuid = appUuid,
+      processName = processName,
+      appExecutable = appExecutable,
+      executablePath = executablePath,
+      timeZone = timeZone,
+      parentProcName = parentProcName,
+      parentPid = parentPid,
+      appStartTimeSecs = appStartTimeSecs,
+      systemBootTimeSecs = systemBootTimeSecs,
+    )
+    pushMemoryAndStorage(ctx)
+  }
+
+  private fun readProcSelfCmdline(): String = try {
+    java.io.File("/proc/self/cmdline").readBytes()
+      .takeWhile { it != 0.toByte() }
+      .toByteArray()
+      .toString(Charsets.UTF_8)
+  } catch (_: Throwable) { "" }
+
+  private fun pushMemoryAndStorage(ctx: Context) {
+    val rt = Runtime.getRuntime()
+    val memorySize = try {
+      rt.maxMemory()
+    } catch (_: Throwable) { -1L }
+    val stat = try {
+      android.os.StatFs(ctx.filesDir.absolutePath)
+    } catch (_: Throwable) { null }
+    val storageSize = stat?.let { it.blockCountLong * it.blockSizeLong } ?: -1L
+    val storageFree = stat?.let { it.availableBlocksLong * it.blockSizeLong } ?: -1L
+    ScoutNdkSignalHandler.setMemoryInfoIfLoaded(memorySize, storageSize, storageFree)
+  }
+
+  private fun persistedAppUuid(ctx: Context): String {
+    val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val existing = prefs.getString(KEY_APP_UUID, null)
+    if (!existing.isNullOrEmpty()) return existing
+    val fresh = UUID.randomUUID().toString()
+    prefs.edit().putString(KEY_APP_UUID, fresh).apply()
+    return fresh
+  }
+
+  private fun computeDeviceAppHash(ctx: Context): String {
+    return try {
+      val androidId = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+      val seed = "${ctx.packageName}:$androidId"
+      val md = MessageDigest.getInstance("SHA-256")
+      val digest = md.digest(seed.toByteArray(Charsets.UTF_8))
+      digest.joinToString("") { "%02x".format(it) }.substring(0, 32)
+    } catch (_: Throwable) {
+      ""
+    }
+  }
+
+  private fun registerForegroundTracking(ctx: Context) {
+    val app = ctx.applicationContext as? Application ?: return
+    lastTransitionElapsedMs = SystemClock.elapsedRealtime()
+    app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+      private var started = 0
+      override fun onActivityStarted(a: Activity) {
+        started += 1
+        if (started == 1) transitionTo(foreground = true)
+      }
+      override fun onActivityStopped(a: Activity) {
+        if (started > 0) started -= 1
+        if (started == 0) transitionTo(foreground = false)
+      }
+      override fun onActivityCreated(a: Activity, b: Bundle?) {}
+      override fun onActivityResumed(a: Activity) {}
+      override fun onActivityPaused(a: Activity) {}
+      override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
+      override fun onActivityDestroyed(a: Activity) {}
+    })
+  }
+}
+
 private object ScoutExitInfoCollector {
   private const val PREFS = "scout_exit_info"
   private const val KEY_LAST_TIMESTAMP = "last_timestamp"
-  private const val MAX_TRACE_BYTES = 32_000
 
-  
   fun drain(ctx: Context, dir: File) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
     val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -137,9 +360,7 @@ private object ScoutExitInfoCollector {
       
       val trace = try {
         info.traceInputStream?.use { stream ->
-          val buf = ByteArray(MAX_TRACE_BYTES)
-          val read = stream.read(buf)
-          if (read > 0) String(buf, 0, read, Charsets.UTF_8) else ""
+          stream.readBytes().toString(Charsets.UTF_8)
         } ?: ""
       } catch (_: Throwable) {
         ""

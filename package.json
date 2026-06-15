@@ -1,6 +1,6 @@
 {
   "name": "@base-14/scout-react",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Zero-config OpenTelemetry RUM for React and React Native. Auto-captures clicks, navigation, errors, lifecycle, network, performance, and web vitals.",
   "license": "MIT",
   "author": "base-14",
@@ -11,15 +11,18 @@
   "type": "module",
   "main": "./dist/web/index.cjs",
   "module": "./dist/web/index.js",
+  "react-native": "./dist/native/index.js",
   "types": "./dist/web/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/web/index.d.ts",
+      "react-native": "./dist/native/index.js",
       "import": "./dist/web/index.js",
       "require": "./dist/web/index.cjs"
     },
     "./native": {
       "types": "./dist/native/index.d.ts",
+      "react-native": "./dist/native/index.js",
       "default": "./dist/native/index.js"
     },
     "./react": {

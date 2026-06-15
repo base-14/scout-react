@@ -12,12 +12,18 @@ import {
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
 import { Scout as ScoutCore } from '../core/scout';
-import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
+import {
+  resolveConfig,
+  resolveEndpoint,
+  type ScoutConfig,
+  type ResolvedConfig,
+} from '../core/config';
+import type { BreadcrumbManager } from '../core/breadcrumb-manager';
 import { wrapWithRetry } from '../core/retry-exporter';
 import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
-import { SPAN } from '../core/spans';
+import { SPAN, BREADCRUMB_TYPE } from '../core/spans';
 import { NativePlatform } from './platform';
 import { installNativeRejectionTracker } from './instrumentations/error';
 import { installNativeLifecycleTracker } from './instrumentations/lifecycle';
@@ -31,6 +37,7 @@ import { installNativeConsoleCapture } from './instrumentations/console';
 import { installNativeScrollTracker } from './instrumentations/scroll';
 import { installNativeTapTracker } from './instrumentations/tap';
 import { installNativeCrashReader } from './instrumentations/native-crash';
+import { installUiHangDetector } from './instrumentations/ui-hang';
 import { installNativeContextTracker } from './instrumentations/context';
 import { emitScoutConfigLog, emitScoutUsageOnce } from '../core/telemetry';
 import { ScoutRootBoundary } from './error-boundary';
@@ -40,6 +47,7 @@ export { SPAN, BREADCRUMB_TYPE } from '../core/spans';
 export { METRIC } from '../core/metrics';
 export { ScoutCore };
 export { ScoutTouchBoundary } from './touch-boundary';
+export { useScoutScrollTracking } from './scroll-observer';
 export { ScoutErrorBoundary, ScoutRootBoundary } from './error-boundary';
 export type {
   Attributes,
@@ -100,7 +108,19 @@ export const Scout = {
     const endpoint = resolveEndpoint(resolved.endpoint, resolved.secure);
     const platform = new NativePlatform();
     const offline = buildOfflineWiring(platform, endpoint, resolved.offlineBuffer);
+    const meta = platform.readAppMetadata
+      ? await platform.readAppMetadata()
+      : { version: null, build: null, bundleId: null };
+    if (config.serviceVersion === undefined && meta.version) {
+      resolved.serviceVersion = meta.build
+        ? `${meta.version}+${meta.build}`
+        : meta.version;
+    }
     const baseAttrs = await platform.collectResourceAttributes();
+    const appAttrs: Record<string, string> = {};
+    if (meta.version) appAttrs[ATTR.APP_VERSION] = meta.version;
+    if (meta.build) appAttrs[ATTR.APP_BUILD] = meta.build;
+    if (meta.bundleId) appAttrs[ATTR.APP_BUNDLE_ID] = meta.bundleId;
     const resource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: resolved.serviceName,
       [ATTR_SERVICE_VERSION]: resolved.serviceVersion,
@@ -109,6 +129,7 @@ export const Scout = {
         ? { [ATTR.APPLICATION_ID]: resolved.applicationId }
         : {}),
       ...(resolved.buildId ? { [ATTR.APP_BUILD_ID]: resolved.buildId } : {}),
+      ...appAttrs,
       ...baseAttrs,
       ...((resolved.resourceAttributes as Record<string, any>) ?? {}),
     });
@@ -229,6 +250,40 @@ export const Scout = {
     _disposers.push(installNativeContextTracker(core));
     _disposers.push(await installNativeCrashDetector(core));
     void installNativeCrashReader(core);
+    _disposers.push(await installUiHangDetector(core, resolved.iosHangThresholdMs));
+    try {
+      const ExpoModules = withSuppression(() => require('expo-modules-core'));
+      const ScoutCrash: any = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash');
+      if (typeof ScoutCrash?.setBreadcrumbs === 'function') {
+        core.breadcrumbsManager.setNativeSink((json) => {
+          try {
+            void ScoutCrash.setBreadcrumbs(json);
+          } catch {}
+        });
+      }
+      const pushSessionContext = () => {
+        if (typeof ScoutCrash?.setSessionContext !== 'function') return;
+        const sid = core.sessionId;
+        const sstart = core.sessionManager.startedAtIso;
+        if (!sid || !sstart) return;
+        try {
+          void ScoutCrash.setSessionContext(sid, sstart);
+        } catch {}
+      };
+      pushSessionContext();
+      if (typeof ScoutCrash?.notifySessionRotated === 'function') {
+        core.sessionManager.setRotationListener(() => {
+          try {
+            void ScoutCrash.notifySessionRotated();
+          } catch {}
+          pushSessionContext();
+        });
+      } else if (typeof ScoutCrash?.setSessionContext === 'function') {
+        core.sessionManager.setRotationListener(() => {
+          pushSessionContext();
+        });
+      }
+    } catch {}
     const nativeStartMs = await readNativeProcessStartMs();
     const coldDurationSec =
       nativeStartMs !== null
@@ -239,6 +294,15 @@ export const Scout = {
       [ATTR.APP_STARTUP_DURATION]: coldDurationSec,
       ...core.commonAttributes(),
     });
+    const fbcMs = Math.round(coldDurationSec * 1000);
+    core.emitSpan(SPAN.APP_VITAL, {
+      [ATTR.VITAL_NAME]: 'fbc',
+      [ATTR.VITAL_TYPE]: 'startup',
+      [ATTR.VITAL_DURATION]: coldDurationSec,
+      [ATTR.VITAL_DURATION_MS]: fbcMs,
+      ...core.commonAttributes(),
+    });
+    core.addBreadcrumb(BREADCRUMB_TYPE.STARTUP, `cold_start: ${fbcMs}ms`);
     try {
       emitScoutConfigLog(core);
     } catch {}
@@ -297,6 +361,18 @@ export const Scout = {
   },
   get instance(): ScoutCore | null {
     return _instance;
+  },
+  get config(): ResolvedConfig | null {
+    return _instance?.config ?? null;
+  },
+  get userAttributes(): Readonly<Attributes> {
+    return _instance?.userAttributes ?? {};
+  },
+  get anonymousId(): string | null {
+    return _instance?.anonymousId ?? null;
+  },
+  get breadcrumbsManager(): BreadcrumbManager | null {
+    return _instance?.breadcrumbsManager ?? null;
   },
   logEvent(name: string, attributes?: Attributes): void {
     if (_instance) emitScoutUsageOnce(_instance, 'logEvent');

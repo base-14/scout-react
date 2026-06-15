@@ -1,4 +1,9 @@
-export type AttributeValue = string | number | boolean | Array<string | number | boolean>;
+export type AttributeValue =
+  | string
+  | number
+  | boolean
+  | Uint8Array
+  | Array<string | number | boolean>;
 export type Attributes = Record<string, AttributeValue>;
 export type EventType = 'span' | 'metric' | 'log';
 export type SeverityText = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';

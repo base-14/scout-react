@@ -12,10 +12,12 @@ export const SPAN = {
   LONG_TASK: 'long_task',
   FROZEN_FRAME: 'frozen_frame',
   ANR: 'anr',
+  UI_HANG: 'ui_hang',
+  APP_LIFECYCLE_CHANGED: 'app_lifecycle.changed',
   HTTP_REQUEST: 'http.request',
   WEB_VITAL: 'web_vital',
   CUSTOM_TIMING: 'custom_timing',
-  CUSTOM_VITAL: 'custom_vital',
+  APP_VITAL: 'app_vital',
   OPERATION_STEP: 'operation_step',
 } as const;
 export const ERROR_CLASS_SPANS: ReadonlySet<string> = new Set([
@@ -23,6 +25,7 @@ export const ERROR_CLASS_SPANS: ReadonlySet<string> = new Set([
   SPAN.NATIVE_CRASH,
   SPAN.APP_CRASH,
   SPAN.ANR,
+  SPAN.UI_HANG,
 ]);
 export const BREADCRUMB_TYPE = {
   TAP: 'tap',

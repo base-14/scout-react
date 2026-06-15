@@ -14,60 +14,58 @@ export async function installNativeCrashReader(scout: Scout): Promise<void> {
     if (!reports || reports.length === 0) return;
     for (const report of reports) {
       try {
-        scout.emitSpan(SPAN.NATIVE_CRASH, {
+        const attrs: Record<string, string | number | boolean> = {
           [ATTR.CRASH_TYPE]: String(report['crash.type'] ?? 'unknown'),
           [ATTR.CRASH_REASON]: String(report['crash.reason'] ?? ''),
           [ATTR.ERROR_STACK_TRACE]: String(report['crash.stack_trace'] ?? ''),
-          ...optional('crash.signal_code', report),
-          ...optional('crash.signal', report),
-          ...optional('crash.signal_address', report),
-          ...optional('crash.mach_exception', report),
-          ...optional('crash.mach_code', report),
-          ...optional('crash.nsexception_name', report),
-          ...optional('crash.thread', report),
-          ...optional('crash.timestamp', report),
-          ...optional('crash.exception_type', report),
-          ...optional('crash.exception_code', report),
-          ...optional('crash.termination_reason', report),
-          ...optional('crash.application_version', report),
-          ...optional('crash.application_build_version', report),
-          ...optional('crash.os_version', report),
-          ...optional('crash.device_type', report),
-          ...optional('crash.region_format', report),
-          ...optional('crash.diagnostic_payload_time_begin', report),
-          ...optional('crash.diagnostic_payload_time_end', report),
-          ...optional('crash.hang_duration_ms', report),
-          ...optional('crash.callstack_tree_json', report),
-          ...optional('crash.report_id', report),
-          ...optional('crash.error_type', report),
-          ...optional('crash.queue', report),
-          ...optional('crash.registers_json', report),
-          ...optional('crash.binary_images_json', report),
-          ...optional('crash.machine', report),
-          ...optional('crash.device_model', report),
-          ...optional('crash.cpu_arch', report),
-          ...optional('crash.build_type', report),
-          ...optional('crash.bundle_id', report),
-          ...optional('crash.kernel_version', report),
-          ...optional('crash.os_name', report),
-          ...optional('crash.ppid', report),
-          ...optional('crash.cpp_exception_name', report),
-          ...optional('crash.fault_address_register', report),
-          ...optional('crash.exception_syndrome_register', report),
-          ...optional('crash.os_reason_code', report),
-          ...optional('crash.os_reason_name', report),
-          ...optional('crash.subreason', report),
-          ...optional('crash.exit_status', report),
-          ...optional('crash.death_timestamp_ms', report),
-          ...optional('crash.process_name', report),
-          ...optional('crash.pid', report),
-          ...optional('crash.importance', report),
-          ...optional('crash.pss_kb', report),
-          ...optional('crash.rss_kb', report),
-          ...optional('crash.tombstone', report),
-          [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serialize(),
-          ...scout.commonAttributes(),
-        });
+        };
+        for (const [k, v] of Object.entries(report)) {
+          if (!k.startsWith('crash.')) continue;
+          if (k === 'crash.type' || k === 'crash.reason' || k === 'crash.stack_trace')
+            continue;
+          if (v === undefined || v === null) continue;
+          if (typeof v === 'string') {
+            if (v === '') continue;
+            attrs[k] = v;
+          } else if (typeof v === 'number' || typeof v === 'boolean') {
+            attrs[k] = v;
+          } else {
+            attrs[k] = String(v);
+          }
+        }
+        attrs[ATTR.BREADCRUMBS] = scout.breadcrumbsManager.serialize();
+        try {
+          const lastScreen = (() => {
+            const crumbs = JSON.parse(scout.breadcrumbsManager.serialize());
+            for (let i = crumbs.length - 1; i >= 0; i--) {
+              const c = crumbs[i];
+              if (c?.type === 'navigation' && typeof c.message === 'string') {
+                const m = c.message.match(/screen:\s*(.+)/);
+                if (m && m[1]) return m[1];
+              }
+            }
+            return null;
+          })();
+          if (lastScreen) attrs['crash.last_screen'] = lastScreen;
+        } catch {}
+        if (typeof attrs['crash.error_type'] === 'string' && !attrs[ATTR.CRASH_TYPE]) {
+          attrs[ATTR.CRASH_TYPE] = attrs['crash.error_type'];
+        }
+        delete attrs['crash.error_type'];
+        const common = scout.commonAttributes();
+        const crashedSessionId =
+          (report['crash.previous_session_id'] as string | undefined) ??
+          (report['crash.session_id'] as string | undefined);
+        const crashedSessionStart =
+          (report['crash.session_started_at'] as string | undefined) ??
+          (report['crash.started_at'] as string | undefined);
+        if (crashedSessionId) {
+          common[ATTR.SESSION_ID] = crashedSessionId;
+        }
+        if (crashedSessionStart) {
+          common[ATTR.SESSION_START_TIME] = crashedSessionStart;
+        }
+        scout.emitSpan(SPAN.NATIVE_CRASH, { ...attrs, ...common });
       } catch {}
     }
     await ScoutCrash.clearPendingCrashes();
@@ -77,9 +75,4 @@ interface ScoutCrashApi {
   getPendingCrashes(): Promise<Array<Record<string, unknown>>>;
   clearPendingCrashes(): Promise<void>;
   isInstalled(): Promise<boolean>;
-}
-function optional(key: string, source: Record<string, unknown>): Record<string, string> {
-  const v = source[key];
-  if (v === undefined || v === null || v === '') return {};
-  return { [key]: String(v) };
 }

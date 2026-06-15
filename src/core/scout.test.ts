@@ -22,11 +22,13 @@ describe('Scout.commonAttributes', () => {
   beforeEach(() => {
     makeRecorder();
   });
-  it('includes session.id and network.connection.type', async () => {
+  it('includes session.id, session.start_time, session.sample_rate (spec §3)', async () => {
     const s = await makeScout();
     const attrs = s.commonAttributes();
     expect(attrs[ATTR.SESSION_ID]).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBe('unknown');
+    expect(attrs[ATTR.SESSION_START_TIME]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(typeof attrs[ATTR.SESSION_SAMPLE_RATE]).toBe('string');
+    expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBeUndefined();
   });
   it('includes user.id and user.* attrs once setUser is called', async () => {
     const s = await makeScout();

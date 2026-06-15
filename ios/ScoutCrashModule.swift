@@ -20,8 +20,12 @@ private func scoutProcessStartTimeMillis() -> Double {
 }
 
 public class ScoutCrashModule: Module {
+  private var hangWatchdog: AppHangWatchdog?
+
   public func definition() -> ModuleDefinition {
     Name("ScoutCrash")
+
+    Events("ScoutUIHang")
 
     OnCreate {
       
@@ -82,15 +86,35 @@ public class ScoutCrashModule: Module {
       return scoutProcessStartTimeMillis()
     }
 
-    AsyncFunction("crashNow") { (reason: String?) -> Void in
-      let message = reason ?? "synthetic native crash from ScoutCrash.crashNow"
-      let exception = NSException(
-        name: NSExceptionName(rawValue: "ScoutCrashTest"),
-        reason: message,
-        userInfo: nil
-      )
-      exception.raise()
+    AsyncFunction("setBreadcrumbs") { (json: String) -> Void in
+      ScoutKSCrashIntegration.setBreadcrumbs(json)
     }
+
+    AsyncFunction("setSessionContext") { (sessionId: String, sessionStartedAt: String) -> Void in
+      ScoutKSCrashIntegration.setSessionContext(sessionId: sessionId, sessionStartedAt: sessionStartedAt)
+    }
+
+    AsyncFunction("startHangDetection") { (thresholdMs: Int) -> Void in
+      guard thresholdMs > 0 else { return }
+      self.hangWatchdog?.stop()
+      let wd = AppHangWatchdog(
+        label: "ui_hang",
+        thresholdMs: thresholdMs
+      ) { [weak self] elapsedMs in
+        self?.sendEvent("ScoutUIHang", [
+          "durationMs": elapsedMs,
+          "thresholdMs": thresholdMs,
+        ])
+      }
+      self.hangWatchdog = wd
+      wd.start()
+    }
+
+    AsyncFunction("stopHangDetection") { () -> Void in
+      self.hangWatchdog?.stop()
+      self.hangWatchdog = nil
+    }
+
   }
 }
 
@@ -149,14 +173,9 @@ private final class ScoutMetricKitCollector: NSObject, MXMetricManagerSubscriber
       ISO8601DateFormatter().string(from: payload.timeStampBegin)
     report["crash.diagnostic_payload_time_end"] =
       ISO8601DateFormatter().string(from: payload.timeStampEnd)
-    if let tree = String(
-      data: d.callStackTree.jsonRepresentation(),
-      encoding: .utf8
-    ) {
-      
-      
-      report["crash.callstack_tree_json"] = String(tree.prefix(32_000))
-    }
+    report["crash.callstack_tree_json"] =
+      d.callStackTree.jsonRepresentation().base64EncodedString()
+    report["crash.callstack_tree_encoding"] = "base64"
     persist(report, prefix: "mxc")
   }
 
@@ -164,23 +183,21 @@ private final class ScoutMetricKitCollector: NSObject, MXMetricManagerSubscriber
     _ d: MXHangDiagnostic,
     payload: MXDiagnosticPayload
   ) {
+    let hangMs = d.hangDuration.converted(to: .milliseconds).value
     var report: [String: Any] = [
       "crash.type": "metric_kit_hang",
       "crash.timestamp": ISO8601DateFormatter().string(from: Date()),
+      "crash.reason": "App hang \(Int(hangMs))ms",
     ]
-    report["crash.hang_duration_ms"] =
-      d.hangDuration.converted(to: .milliseconds).value
+    report["crash.hang_duration_ms"] = hangMs
     if let ver = d.applicationVersion as String? {
       report["crash.application_version"] = ver
     }
     report["crash.os_version"] = d.metaData.osVersion
     report["crash.device_type"] = d.metaData.deviceType
-    if let tree = String(
-      data: d.callStackTree.jsonRepresentation(),
-      encoding: .utf8
-    ) {
-      report["crash.callstack_tree_json"] = String(tree.prefix(32_000))
-    }
+    report["crash.callstack_tree_json"] =
+      d.callStackTree.jsonRepresentation().base64EncodedString()
+    report["crash.callstack_tree_encoding"] = "base64"
     persist(report, prefix: "mxh")
   }
 

@@ -1,3 +1,3 @@
-import Scout from '@base-14/scout-react/native';
+import { registerRootComponent } from 'expo';
 import App from './App';
-Scout.registerRootComponent(App);
+registerRootComponent(App);
