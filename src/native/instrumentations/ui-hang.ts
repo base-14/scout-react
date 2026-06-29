@@ -17,6 +17,7 @@ interface ScoutCrashHangApi {
 interface HangPayload {
   durationMs?: number;
   thresholdMs?: number;
+  mainThreadStack?: string;
 }
 
 export async function installUiHangDetector(
@@ -39,10 +40,16 @@ export async function installUiHangDetector(
     const thresholdSec = Number(payload?.thresholdMs ?? thresholdMs) / 1000;
     try {
       const screen = getCurrentScreen();
+      const stack =
+        typeof payload?.mainThreadStack === 'string' && payload.mainThreadStack.length > 0
+          ? payload.mainThreadStack
+          : null;
       scout.emitSpan(SPAN.UI_HANG, {
         [ATTR.UI_HANG_DURATION]: durationSec,
         [ATTR.UI_HANG_THRESHOLD]: thresholdSec,
         ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
+        ...(stack ? { [ATTR.UI_HANG_MAIN_THREAD_STACK]: stack } : {}),
+        [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serialize(),
         ...scout.commonAttributes(),
       });
       scout.breadcrumbsManager.add(BREADCRUMB_TYPE.ANR, `UI hang: ${durationMs}ms`);

@@ -262,6 +262,9 @@ export class Scout {
     const startIso = this.session.startedAtIso;
     if (startIso) attrs[ATTR.SESSION_START_TIME] = startIso;
     if (this._currentScreen) attrs[ATTR.SCREEN_NAME] = this._currentScreen;
+    for (const [k, v] of Object.entries(this._sessionAttrs)) {
+      attrs[k] = v;
+    }
     const uid = this.user.id;
     if (uid) attrs[ATTR.USER_ID] = uid;
     for (const [k, v] of Object.entries(this.user.attributes)) {
@@ -304,6 +307,13 @@ export class Scout {
   addBreadcrumb(type: string, message: string): void {
     this.breadcrumbs.add(type, message);
   }
+  setSessionAttributes(attrs: Attributes): void {
+    this._sessionAttrs = { ...attrs };
+  }
+  clearSessionAttributes(): void {
+    this._sessionAttrs = {};
+  }
+  private _sessionAttrs: Attributes = {};
   private _viewStartedAt = performance.now();
   private _activeVitals = new Map<
     string,
@@ -436,7 +446,7 @@ export class Scout {
     } catch {}
     this.emitSpan(SPAN.ERROR, attrs, { status: SpanStatusCode.ERROR });
     this.errorCounter?.add(1, { handled: String(handled) });
-    this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, message);
+    this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, `manual_error: ${runtimeTypeOf(error)}`);
   }
   reportUncaught(error: unknown): void {
     const { message, stack } = normalizeError(error);
@@ -462,7 +472,10 @@ export class Scout {
     attrs[ATTR.ERROR_FINGERPRINT] = errorFingerprint('uncaught_error', message, stack);
     this.emitSpan(SPAN.ERROR, attrs, { status: SpanStatusCode.ERROR });
     this.errorCounter?.add(1, { handled: 'false' });
-    this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, message);
+    this.breadcrumbs.add(
+      BREADCRUMB_TYPE.ERROR,
+      `uncaught_error: ${runtimeTypeOf(error)}`,
+    );
   }
   setUser(id: string, attributes?: Attributes): void {
     this.user.set(id, attributes);
@@ -689,6 +702,22 @@ function normalizeError(err: unknown): {
     return { message: err.message, stack: err.stack ?? '' };
   }
   return { message: String(err), stack: '' };
+}
+function runtimeTypeOf(err: unknown): string {
+  if (err === null) return 'Null';
+  if (err === undefined) return 'Undefined';
+  if (err instanceof Error) {
+    return (
+      (err as { constructor?: { name?: string }; name?: string }).constructor?.name ??
+      err.name ??
+      'Error'
+    );
+  }
+  if (typeof err === 'object') {
+    return (err as { constructor?: { name?: string } }).constructor?.name ?? 'Object';
+  }
+  const t = typeof err;
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 export interface LogOpts {
   error?: unknown;

@@ -25,7 +25,9 @@ export interface ScoutConfig {
   enableAnrDetection?: boolean;
   enableFrameMetrics?: boolean;
   enableMemoryMetrics?: boolean;
+  enableCpuMetrics?: boolean;
   enableWebVitals?: boolean;
+  maxTombstoneBytes?: number;
   enableBatteryTracking?: boolean;
   enableNetworkTracking?: boolean;
   enableLogging?: boolean;
@@ -134,6 +136,8 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     enableAnrDetection: config.enableAnrDetection ?? true,
     enableFrameMetrics: config.enableFrameMetrics ?? true,
     enableMemoryMetrics: config.enableMemoryMetrics ?? true,
+    enableCpuMetrics: config.enableCpuMetrics ?? true,
+    maxTombstoneBytes: Math.max(4096, config.maxTombstoneBytes ?? 131072),
     enableWebVitals: config.enableWebVitals ?? true,
     enableBatteryTracking: config.enableBatteryTracking ?? true,
     enableNetworkTracking: config.enableNetworkTracking ?? true,

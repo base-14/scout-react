@@ -21,15 +21,17 @@ private func scoutProcessStartTimeMillis() -> Double {
 
 public class ScoutCrashModule: Module {
   private var hangWatchdog: AppHangWatchdog?
+  private var anrWatchdog: AppHangWatchdog?
+  private var mainThreadPort: thread_t = thread_t(MACH_PORT_NULL)
 
   public func definition() -> ModuleDefinition {
     Name("ScoutCrash")
 
-    Events("ScoutUIHang")
+    Events("ScoutUIHang", "ScoutAnr")
 
     OnCreate {
-      
-      
+
+
       _ = ScoutCrashInstaller.crashDirPath()
 
       
@@ -96,15 +98,26 @@ public class ScoutCrashModule: Module {
 
     AsyncFunction("startHangDetection") { (thresholdMs: Int) -> Void in
       guard thresholdMs > 0 else { return }
+      if self.mainThreadPort == thread_t(MACH_PORT_NULL) {
+        DispatchQueue.main.sync { self.mainThreadPort = ScoutThreadBacktrace.currentPort() }
+      }
       self.hangWatchdog?.stop()
       let wd = AppHangWatchdog(
         label: "ui_hang",
         thresholdMs: thresholdMs
-      ) { [weak self] elapsedMs in
-        self?.sendEvent("ScoutUIHang", [
+      ) { [weak self] elapsedMs, source in
+        guard let self = self else { return }
+        let frames = ScoutThreadBacktrace.capture(self.mainThreadPort)
+        let mainStack = frames.joined(separator: "\n")
+        var payload: [String: Any] = [
           "durationMs": elapsedMs,
           "thresholdMs": thresholdMs,
-        ])
+          "source": source,
+        ]
+        if !mainStack.isEmpty {
+          payload["mainThreadStack"] = mainStack
+        }
+        self.sendEvent("ScoutUIHang", payload)
       }
       self.hangWatchdog = wd
       wd.start()
@@ -113,6 +126,107 @@ public class ScoutCrashModule: Module {
     AsyncFunction("stopHangDetection") { () -> Void in
       self.hangWatchdog?.stop()
       self.hangWatchdog = nil
+    }
+
+    AsyncFunction("startAnrDetection") { (thresholdMs: Int) -> Void in
+      guard thresholdMs > 0 else { return }
+      if self.mainThreadPort == thread_t(MACH_PORT_NULL) {
+        DispatchQueue.main.sync { self.mainThreadPort = ScoutThreadBacktrace.currentPort() }
+      }
+      self.anrWatchdog?.stop()
+      let wd = AppHangWatchdog(
+        label: "anr",
+        thresholdMs: thresholdMs
+      ) { [weak self] elapsedMs, source in
+        guard let self = self else { return }
+        let frames = ScoutThreadBacktrace.capture(self.mainThreadPort)
+        let mainStack = frames.joined(separator: "\n")
+        var payload: [String: Any] = [
+          "durationMs": elapsedMs,
+          "thresholdMs": thresholdMs,
+          "source": source,
+        ]
+        if !mainStack.isEmpty {
+          payload["mainThreadStack"] = mainStack
+        }
+        self.sendEvent("ScoutAnr", payload)
+      }
+      self.anrWatchdog = wd
+      wd.start()
+    }
+
+    AsyncFunction("stopAnrDetection") { () -> Void in
+      self.anrWatchdog?.stop()
+      self.anrWatchdog = nil
+    }
+
+    AsyncFunction("notifyJsAlive") { () -> Void in
+      self.hangWatchdog?.notifyJsAlive()
+      self.anrWatchdog?.notifyJsAlive()
+    }
+
+    AsyncFunction("__debugBlockMainThread") { (durationMs: Int) -> Void in
+      let clamped = max(0, min(durationMs, 30_000))
+      DispatchQueue.main.async {
+        Thread.sleep(forTimeInterval: Double(clamped) / 1000.0)
+      }
+    }
+
+    AsyncFunction("isDeviceCompromised") { () -> Bool in
+      #if targetEnvironment(simulator)
+      return false
+      #else
+      let paths = [
+        "/Applications/Cydia.app",
+        "/Library/MobileSubstrate/MobileSubstrate.dylib",
+        "/bin/bash",
+        "/usr/sbin/sshd",
+        "/etc/apt",
+        "/private/var/lib/apt/",
+        "/private/var/lib/cydia",
+        "/usr/libexec/ssh-keysign",
+        "/usr/libexec/sftp-server",
+        "/Applications/Sileo.app",
+        "/Applications/Zebra.app",
+      ]
+      let fm = FileManager.default
+      for path in paths {
+        if fm.fileExists(atPath: path) { return true }
+      }
+      return false
+      #endif
+    }
+
+    AsyncFunction("getCpuPercent") { () -> Double in
+      var threadList: thread_act_array_t?
+      var threadCount: mach_msg_type_number_t = 0
+      let threadResult = task_threads(mach_task_self_, &threadList, &threadCount)
+      var totalCpu: Double = 0.0
+      if threadResult == KERN_SUCCESS, let threads = threadList {
+        for i in 0..<Int(threadCount) {
+          var threadInfo = thread_basic_info()
+          var threadInfoCount = mach_msg_type_number_t(
+            MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size
+          )
+          let infoResult = withUnsafeMutablePointer(to: &threadInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+              thread_info(
+                threads[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &threadInfoCount
+              )
+            }
+          }
+          if infoResult == KERN_SUCCESS {
+            let usage = Double(threadInfo.cpu_usage) / Double(TH_USAGE_SCALE) * 100.0
+            totalCpu += usage
+          }
+        }
+        vm_deallocate(
+          mach_task_self_,
+          vm_address_t(bitPattern: threads),
+          vm_size_t(threadCount) * vm_size_t(MemoryLayout<thread_t>.size)
+        )
+      }
+      return totalCpu
     }
 
   }

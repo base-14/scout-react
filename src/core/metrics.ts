@@ -10,6 +10,7 @@ export const METRIC = {
   WEB_VITAL_TTFB: 'web.vital.ttfb',
   WEB_VITAL_FCP: 'web.vital.fcp',
   RN_MEMORY_USAGE: 'react_native.memory.usage',
+  RN_CPU_USAGE: 'react_native.cpu.usage',
   RN_FRAME_BUILD_TIME: 'react_native.frame.build_time',
   RN_FRAME_DROPPED: 'react_native.frame.dropped',
   RN_FRAME_REFRESH_RATE: 'react_native.frame.refresh_rate',

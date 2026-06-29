@@ -26,10 +26,47 @@ export function DiagnosticsPanel() {
             while (Date.now() < end) {
             }
         }}/>
-        <Btn label="anr (6s freeze)" variant="danger" onPress={() => {
+        <Btn label="anr (JS thread, 6s)" variant="danger" onPress={() => {
             const end = Date.now() + 6000;
             while (Date.now() < end) {
             }
+        }}/>
+        <Btn label="anr (UI thread, 6s)" variant="danger" onPress={() => {
+            try {
+                const ExpoModules = require('expo-modules-core');
+                const ScoutCrash: any = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash');
+                if (typeof ScoutCrash?.__debugBlockMainThread === 'function') {
+                    void ScoutCrash.__debugBlockMainThread(6000);
+                }
+            } catch { }
+        }}/>
+        <Btn label="ui_hang (UI thread, 500ms)" variant="danger" onPress={() => {
+            try {
+                const ExpoModules = require('expo-modules-core');
+                const ScoutCrash: any = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash');
+                if (typeof ScoutCrash?.__debugBlockMainThread === 'function') {
+                    void ScoutCrash.__debugBlockMainThread(500);
+                }
+            } catch { }
+        }}/>
+        <Btn label="anr (JS thread, 12s long freeze)" variant="danger" onPress={() => {
+            const end = Date.now() + 12000;
+            while (Date.now() < end) {
+            }
+        }}/>
+        <Btn label="manual breadcrumb" onPress={() => {
+            try {
+                const Scout = require('@base-14/scout-react').default ?? require('@base-14/scout-react');
+                Scout.addBreadcrumb?.('manual', `tapped at ${new Date().toISOString()}`);
+            } catch { }
+        }}/>
+        <Btn label="log info / warn / error" onPress={() => {
+            try {
+                const Scout = require('@base-14/scout-react').default ?? require('@base-14/scout-react');
+                Scout.logInfo?.('manual info log');
+                Scout.logWarning?.('manual warn log');
+                Scout.logError?.('manual error log');
+            } catch { }
         }}/>
         <Btn label="render error" variant="danger" onPress={() => {
             (undefined as any).neverPropertyAccess.crash();

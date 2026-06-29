@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-29
+
 ### Added
 
 - **`screen_load` span on React Native navigation transitions.** Emitted
@@ -24,10 +26,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Scout.setCurrentScreen(name)` public API.** Lets host code (or the
   built-in route trackers) set the active screen so every subsequent
   span/metric/log carries `screen.name` via `commonAttributes()`.
+- **`Scout.setSessionAttributes(attrs)` / `clearSessionAttributes()` API.**
+  Integrator-supplied attributes stamped on every span in the current
+  session, alongside the `user.*` namespace. Survives session rotations
+  until explicitly cleared. Matches scout-flutter v0.1.19.
+- **`react_native.cpu.usage` gauge.** Periodic CPU usage sample (every
+  10s). Android reads `/proc/<pid>/stat` ticks and computes percentage
+  via wall-clock delta; iOS sums `cpu_usage` across all task threads
+  via Mach `thread_basic_info`. Disabled by `enableCpuMetrics: false`.
+- **Native ANR detection (Android + iOS) with main-thread + JS-thread
+  heartbeats.** Android `ScoutAnrWatchdog` runs on a dedicated
+  background thread, posts heartbeat runnables to `Looper.getMainLooper()`
+  AND tracks a JS-thread heartbeat via `notifyJsAlive()`; on either
+  silence past `anrThresholdMs` it captures a full thread dump via
+  `ScoutThreadDumpCollector` (`Thread.getAllStackTraces()` capped at
+  32 KB / 64 frames per thread) and ships it through a new `ScoutAnr`
+  Expo event. iOS uses the existing `AppHangWatchdog`, extended to
+  also track the JS heartbeat; captures the main thread's backtrace
+  via `ScoutThreadBacktrace` (Mach `thread_suspend` + frame-pointer
+  walking + `dladdr()` symbolication, arm64 + x86_64). The `anr` span
+  now carries `anr.main_thread_stack`, `anr.threads_json`,
+  `anr.thread_count`, `anr.source_thread` (`main` / `js`), plus
+  `breadcrumbs`. The `ui_hang` span (iOS) gets
+  `ui_hang.main_thread_stack` + breadcrumbs.
+- **Resource attrs: `device.orientation`, `device.is_jail_broken`,
+  `ndk.build_id`.** Orientation is auto-updated on `Dimensions.change`
+  events. Jailbreak/root check runs once at init (root-package +
+  binary path probes on Android; Cydia-style path probes on iOS,
+  always returns false on the simulator). `ndk.build_id` reads the
+  ELF `.note.gnu.build-id` from `libscout_signal_handler.so` so the
+  backend can match native crash stacks against the correct stripped
+  binary.
+- **`device.battery.discharge_rate` runtime attribute.** Sampled every
+  60s via `BatteryManager.BATTERY_PROPERTY_CURRENT_NOW` on Android
+  (µA); not available on iOS (Flutter doesn't expose this either).
+- **`maxTombstoneBytes` config (default `131072`, min `4096`).** Caps
+  the size of the `crash.tombstone` attribute on Android `ExitInfo`
+  crashes — Android tombstones can be multi-megabyte; this prevents
+  span-payload bloat.
+- **Diagnostics panel buttons** in the example app: `anr (JS thread, 6s)`,
+  `anr (UI thread, 6s)`, `anr (JS thread, 12s long freeze)`,
+  `ui_hang (UI thread, 500ms)`, `manual breadcrumb`,
+  `log info / warn / error`.
 - **Per-emit + per-export debug logs when `debug: true`.** `[scout] emit
   <span> <screen>` for every emitted span and `[scout] <traces|metrics|logs>
   attempt N items=K → OK/FAIL ...` for every export attempt. Helps confirm
   the SDK is actually exporting to the configured endpoint.
+- **Native ANR detection with thread dumps (Android).** New
+  `ScoutAnrWatchdog` runs on a background `HandlerThread`, posts heartbeat
+  runnables to the main `Looper`, and if the main thread doesn't respond
+  within the configured threshold (default 5000ms, `anrThresholdMs`
+  config) it captures a full thread dump via the new
+  `ScoutThreadDumpCollector` (`Thread.getAllStackTraces()` with per-thread
+  64-frame cap + 32 KB total cap) and ships it through a new
+  `ScoutAnr` Expo event to JS. The `anr` span now carries
+  `anr.main_thread_stack`, `anr.threads_json`, `anr.thread_count`, plus
+  `breadcrumbs` — previously had only duration + threshold.
+  Replaces the prior JS `setInterval` detector (which fired AFTER the
+  block ended, so couldn't observe the blocked main thread).
+- **Native ANR detection with main-thread backtrace (iOS).** Uses the
+  existing `AppHangWatchdog` with a longer threshold for the `anr` tier
+  (5000ms by default) and captures the main thread's backtrace via the
+  new `ScoutThreadBacktrace` (Mach APIs `thread_suspend` +
+  `thread_get_state` + frame-pointer walking + `dladdr()` symbolication —
+  arm64 + x86_64). Frames are shipped via a `ScoutAnr` Expo event;
+  the span carries `anr.main_thread_stack` + breadcrumbs.
+- **`ui_hang.main_thread_stack` on iOS UI hang spans.** Same
+  `ScoutThreadBacktrace` capture, attached to the existing `ui_hang`
+  span (fired at the lower `iosHangThresholdMs` default 250 ms).
+- **`breadcrumbs` attribute on `anr` and `ui_hang` spans.** Was missing
+  from both span types; now stamped from `breadcrumbsManager.serialize()`
+  at emit time so the trail leading up to the hang is preserved.
 
 ### Fixed
 

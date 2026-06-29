@@ -24,8 +24,12 @@ import java.security.MessageDigest
 import java.util.UUID
 
 class ScoutCrashModule : Module() {
+  private var anrWatchdog: ScoutAnrWatchdog? = null
+
   override fun definition() = ModuleDefinition {
     Name("ScoutCrash")
+
+    Events("ScoutAnr")
 
     OnCreate {
       val ctx = appContext.reactContext ?: return@OnCreate
@@ -34,6 +38,137 @@ class ScoutCrashModule : Module() {
       ScoutNdkSignalHandler.installIfNeeded(dir.absolutePath)
       ScoutNativeContextPusher.install(ctx)
       ScoutExitInfoCollector.drain(ctx, dir)
+    }
+
+    OnDestroy {
+      anrWatchdog?.stop()
+      anrWatchdog = null
+    }
+
+    AsyncFunction("startAnrDetection") { thresholdMs: Int ->
+      android.util.Log.i("ScoutAnrWatchdog", "startAnrDetection JS->native thresholdMs=$thresholdMs")
+      if (thresholdMs <= 0) return@AsyncFunction
+      anrWatchdog?.stop()
+      val wd = ScoutAnrWatchdog(thresholdMs.toLong()) { duration, source ->
+        android.util.Log.w("ScoutAnrWatchdog", "callback firing — source=$source duration=${duration}ms")
+        val dump = ScoutThreadDumpCollector.capture()
+        val payload = HashMap<String, Any>()
+        payload["durationMs"] = duration
+        payload["thresholdMs"] = thresholdMs.toLong()
+        payload["source"] = source
+        dump["main_thread_stack"]?.let { payload["mainThreadStack"] = it }
+        dump["threads_json"]?.let { payload["threadsJson"] = it }
+        dump["thread_count"]?.let { payload["threadCount"] = it }
+        try {
+          this@ScoutCrashModule.sendEvent("ScoutAnr", payload)
+          android.util.Log.i("ScoutAnrWatchdog", "sendEvent OK source=$source")
+        } catch (t: Throwable) {
+          android.util.Log.e("ScoutAnrWatchdog", "sendEvent FAILED: $t")
+        }
+      }
+      anrWatchdog = wd
+      wd.start()
+    }
+
+    AsyncFunction("stopAnrDetection") { ->
+      anrWatchdog?.stop()
+      anrWatchdog = null
+    }
+
+    AsyncFunction("notifyJsAlive") { ->
+      anrWatchdog?.notifyJsAlive()
+    }
+
+    AsyncFunction("setMaxTombstoneBytes") { bytes: Int ->
+      ScoutExitInfoCollector.maxTombstoneBytes = bytes.coerceAtLeast(4096)
+    }
+
+    AsyncFunction("__debugBlockMainThread") { durationMs: Int ->
+      val ms = durationMs.coerceIn(0, 30_000).toLong()
+      android.os.Handler(android.os.Looper.getMainLooper()).post {
+        try {
+          Thread.sleep(ms)
+        } catch (_: InterruptedException) {
+        }
+      }
+    }
+
+    AsyncFunction("getCpuTicks") { ->
+      try {
+        val pid = android.os.Process.myPid()
+        val statLine = java.io.File("/proc/$pid/stat").readText().trim().split(" ")
+        val utime = statLine[13].toLong()
+        val stime = statLine[14].toLong()
+        (utime + stime).toDouble()
+      } catch (_: Throwable) {
+        -1.0
+      }
+    }
+
+    AsyncFunction("isDeviceCompromised") { ->
+      try {
+        if (android.os.Build.TAGS?.contains("test-keys") == true) return@AsyncFunction true
+        val rootPaths = arrayOf(
+          "/system/bin/su", "/system/xbin/su", "/sbin/su",
+          "/system/app/Superuser.apk", "/data/local/su",
+          "/data/local/bin/su", "/data/local/xbin/su",
+          "/system/sd/xbin/su", "/system/bin/failsafe/su",
+          "/su/bin/su", "/sbin/.magisk", "/cache/.disable_magisk",
+          "/dev/.magisk.unblock",
+        )
+        for (path in rootPaths) {
+          if (java.io.File(path).exists()) return@AsyncFunction true
+        }
+        val ctx = appContext.reactContext
+        if (ctx != null) {
+          val pm = ctx.packageManager
+          val rootPackages = arrayOf(
+            "com.devadvance.rootcloak", "com.devadvance.rootcloakplus",
+            "com.koushikdutta.superuser", "com.thirdparty.superuser",
+            "eu.chainfire.supersu", "com.noshufou.android.su",
+            "com.topjohnwu.magisk",
+          )
+          for (pkg in rootPackages) {
+            try {
+              pm.getPackageInfo(pkg, 0)
+              return@AsyncFunction true
+            } catch (_: Throwable) {
+            }
+          }
+        }
+        false
+      } catch (_: Throwable) {
+        false
+      }
+    }
+
+    AsyncFunction("getBatteryDischargeRate") { ->
+      try {
+        val ctx = appContext.reactContext ?: return@AsyncFunction null
+        val bm = ctx.getSystemService(android.content.Context.BATTERY_SERVICE)
+          as? android.os.BatteryManager ?: return@AsyncFunction null
+        val current = bm.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+        if (current == Long.MIN_VALUE || current == 0L) null else current
+      } catch (_: Throwable) {
+        null
+      }
+    }
+
+    AsyncFunction("getNdkBuildId") { ->
+      try {
+        val ctx = appContext.reactContext ?: return@AsyncFunction null
+        val abi = android.os.Build.SUPPORTED_ABIS?.firstOrNull() ?: return@AsyncFunction null
+        val libDir = ctx.applicationInfo.nativeLibraryDir
+        val soFile = java.io.File(libDir, "libscout_signal_handler.so")
+        if (soFile.exists()) {
+          val viaFile = ScoutNdkBuildId.readFile(soFile.absolutePath)
+          if (viaFile != null) return@AsyncFunction viaFile
+        }
+        val apkPath = ctx.applicationInfo.sourceDir ?: return@AsyncFunction null
+        ScoutNdkBuildId.readFromApk(apkPath, "lib/$abi/libscout_signal_handler.so")
+      } catch (_: Throwable) {
+        null
+      }
     }
 
     AsyncFunction("getPendingCrashes") { ->
@@ -294,6 +429,7 @@ private object ScoutNativeContextPusher {
 private object ScoutExitInfoCollector {
   private const val PREFS = "scout_exit_info"
   private const val KEY_LAST_TIMESTAMP = "last_timestamp"
+  @Volatile var maxTombstoneBytes: Int = 131072
 
   fun drain(ctx: Context, dir: File) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
@@ -365,7 +501,10 @@ private object ScoutExitInfoCollector {
       } catch (_: Throwable) {
         ""
       }
-      if (trace.isNotEmpty()) put("crash.tombstone", trace)
+      if (trace.isNotEmpty()) {
+        val cap = ScoutExitInfoCollector.maxTombstoneBytes
+        put("crash.tombstone", if (cap > 0 && trace.length > cap) trace.substring(0, cap) else trace)
+      }
       put("crash.timestamp", info.timestamp.toString())
     }
     val out = File(dir, "exit_${info.pid}_${info.timestamp}.json")

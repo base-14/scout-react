@@ -4,17 +4,20 @@ import Darwin
 final class AppHangWatchdog {
   private let thresholdMs: Int
   private let pollIntervalMs: Int
-  private let onHangDetected: (Int) -> Void
+  private let onHangDetected: (Int, String) -> Void
   private let queue: DispatchQueue
-  private var lastHeartbeatNs: UInt64 = 0
+  private var lastMainHeartbeatNs: UInt64 = 0
+  private var lastJsHeartbeatNs: UInt64 = 0
+  private var jsTracked: Bool = false
   private var running = false
-  private var inHang = false
+  private var inHangMain = false
+  private var inHangJs = false
 
   init(
     label: String,
     thresholdMs: Int,
     pollIntervalMs: Int = 50,
-    onHangDetected: @escaping (Int) -> Void
+    onHangDetected: @escaping (Int, String) -> Void
   ) {
     self.thresholdMs = thresholdMs
     self.pollIntervalMs = max(10, min(pollIntervalMs, thresholdMs))
@@ -26,30 +29,48 @@ final class AppHangWatchdog {
   }
 
   func start() {
-    lastHeartbeatNs = Self.nowNs()
+    lastMainHeartbeatNs = Self.nowNs()
+    lastJsHeartbeatNs = Self.nowNs()
     running = true
     queue.async { [weak self] in self?.loop() }
   }
 
   func stop() { running = false }
 
+  func notifyJsAlive() {
+    lastJsHeartbeatNs = Self.nowNs()
+    jsTracked = true
+  }
+
   deinit { stop() }
 
   private func loop() {
     while running {
       DispatchQueue.main.async { [weak self] in
-        self?.lastHeartbeatNs = Self.nowNs()
+        self?.lastMainHeartbeatNs = Self.nowNs()
       }
       Thread.sleep(forTimeInterval: Double(pollIntervalMs) / 1000.0)
       guard running else { return }
-      let elapsedMs = Int((Self.nowNs() &- lastHeartbeatNs) / 1_000_000)
-      if elapsedMs >= thresholdMs {
-        if !inHang {
-          inHang = true
-          onHangDetected(elapsedMs)
+      let now = Self.nowNs()
+      let elapsedMainMs = Int((now &- lastMainHeartbeatNs) / 1_000_000)
+      if elapsedMainMs >= thresholdMs {
+        if !inHangMain {
+          inHangMain = true
+          onHangDetected(elapsedMainMs, "main")
         }
-      } else if inHang {
-        inHang = false
+      } else if inHangMain {
+        inHangMain = false
+      }
+      if jsTracked {
+        let elapsedJsMs = Int((now &- lastJsHeartbeatNs) / 1_000_000)
+        if elapsedJsMs >= thresholdMs {
+          if !inHangJs {
+            inHangJs = true
+            onHangDetected(elapsedJsMs, "js")
+          }
+        } else if inHangJs && elapsedJsMs < pollIntervalMs * 4 {
+          inHangJs = false
+        }
       }
     }
   }

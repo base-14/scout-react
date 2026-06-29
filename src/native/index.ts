@@ -32,6 +32,9 @@ import { installNativeNavigationTracker } from './instrumentations/navigation';
 import { installNativeCrashDetector } from './instrumentations/crash';
 import { installNativeAnrDetector } from './instrumentations/anr';
 import { installNativeMemoryTracker } from './instrumentations/memory';
+import { installNativeCpuTracker } from './instrumentations/cpu';
+import { installOrientationTracker } from './instrumentations/orientation';
+import { installBatteryDischargeTracker } from './instrumentations/battery-discharge';
 import { installNativeFrameMetricsTracker } from './instrumentations/frame-metrics';
 import { installNativeConsoleCapture } from './instrumentations/console';
 import { installNativeScrollTracker } from './instrumentations/scroll';
@@ -238,8 +241,12 @@ export const Scout = {
     if (resolved.enableNetworkTracking)
       _disposers.push(installNativeNetworkTracker(core));
     if (resolved.enableAnrDetection)
-      _disposers.push(installNativeAnrDetector(core, resolved.anrThresholdMs));
+      _disposers.push(await installNativeAnrDetector(core, resolved.anrThresholdMs));
     if (resolved.enableMemoryMetrics) _disposers.push(installNativeMemoryTracker(core));
+    if (resolved.enableCpuMetrics) _disposers.push(installNativeCpuTracker(core));
+    _disposers.push(installOrientationTracker(core));
+    if (resolved.enableBatteryTracking)
+      _disposers.push(installBatteryDischargeTracker(core));
     if (resolved.enableFrameMetrics)
       _disposers.push(
         installNativeFrameMetricsTracker(core, resolved.longTaskThresholdMs),
@@ -260,6 +267,11 @@ export const Scout = {
             void ScoutCrash.setBreadcrumbs(json);
           } catch {}
         });
+      }
+      if (typeof ScoutCrash?.setMaxTombstoneBytes === 'function') {
+        try {
+          void ScoutCrash.setMaxTombstoneBytes(resolved.maxTombstoneBytes);
+        } catch {}
       }
       const pushSessionContext = () => {
         if (typeof ScoutCrash?.setSessionContext !== 'function') return;
@@ -397,6 +409,12 @@ export const Scout = {
   },
   clearUser(): void {
     _instance?.clearUser();
+  },
+  setSessionAttributes(attrs: Attributes): void {
+    _instance?.setSessionAttributes(attrs);
+  },
+  clearSessionAttributes(): void {
+    _instance?.clearSessionAttributes();
   },
   setAccount(id: string, name?: string): void {
     if (_instance) emitScoutUsageOnce(_instance, 'setAccount');

@@ -119,6 +119,29 @@ export class NativePlatform implements PlatformAdapter {
       } catch {}
     }
     try {
+      const ExpoModules = withSuppression(() => require('expo-modules-core'));
+      const ScoutCrash: any =
+        ExpoModules?.requireOptionalNativeModule?.('ScoutCrash') ?? null;
+      if (ScoutCrash) {
+        if (typeof ScoutCrash.isDeviceCompromised === 'function') {
+          try {
+            const compromised = await ScoutCrash.isDeviceCompromised();
+            if (typeof compromised === 'boolean') {
+              attrs['device.is_jail_broken'] = String(compromised);
+            }
+          } catch {}
+        }
+        if (typeof ScoutCrash.getNdkBuildId === 'function') {
+          try {
+            const buildId = await ScoutCrash.getNdkBuildId();
+            if (typeof buildId === 'string' && buildId.length > 0) {
+              attrs['ndk.build_id'] = buildId;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    try {
       const intl = (globalThis as any).Intl?.DateTimeFormat?.();
       if (intl?.resolvedOptions) {
         const opts = intl.resolvedOptions();
