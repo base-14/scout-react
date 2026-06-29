@@ -48,7 +48,7 @@ export async function installNativeCrashReader(scout: Scout): Promise<void> {
           })();
           if (lastScreen) attrs['crash.last_screen'] = lastScreen;
         } catch {}
-        if (typeof attrs['crash.error_type'] === 'string' && !attrs[ATTR.CRASH_TYPE]) {
+        if (typeof attrs['crash.error_type'] === 'string' && attrs['crash.error_type']) {
           attrs[ATTR.CRASH_TYPE] = attrs['crash.error_type'];
         }
         delete attrs['crash.error_type'];

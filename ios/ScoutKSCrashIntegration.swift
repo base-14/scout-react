@@ -124,6 +124,7 @@ enum ScoutKSCrashIntegration {
       put("crash.app_name",           system["CFBundleName"])
       put("crash.app_executable",     system["CFBundleExecutable"])
       put("crash.bundle_id",          system["CFBundleIdentifier"] ?? system["bundle_id"])
+      put("crash.app_id",             system["CFBundleIdentifier"] ?? system["bundle_id"])
       put("crash.application_version", system["CFBundleShortVersionString"] ?? system["bundle_short_version"])
       put("crash.application_build_version", system["CFBundleVersion"] ?? system["bundle_version"])
       put("crash.executable_path",    system["CFBundleExecutablePath"])

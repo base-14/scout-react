@@ -58,6 +58,7 @@ static char g_parent_proc_name[SCOUT_MAX_FIELD] = {0};
 static char g_kernel_release[SCOUT_MAX_FIELD] = {0};
 static char g_session_id[SCOUT_MAX_FIELD] = {0};
 static char g_session_started_at[SCOUT_MAX_FIELD] = {0};
+static char g_build_fingerprint[SCOUT_MAX_FIELD] = {0};
 static long g_parent_pid = -1;
 static long g_gid = -1;
 static long g_uid = -1;
@@ -666,6 +667,16 @@ static void scout_signal_action(int sig, siginfo_t *info, void *uap) {
   bpos = append_hex64(buf, bpos, sizeof(buf), crash_fp);
   bpos = safe_append(buf, bpos, sizeof(buf), "\"");
 
+#if defined(__aarch64__)
+  if (uc) {
+    bpos = safe_append(buf, bpos, sizeof(buf), ",\"crash.exception_register\":\"x16: ");
+    bpos = append_hex64(buf, bpos, sizeof(buf), uc->uc_mcontext.regs[16]);
+    bpos = safe_append(buf, bpos, sizeof(buf), " x17: ");
+    bpos = append_hex64(buf, bpos, sizeof(buf), uc->uc_mcontext.regs[17]);
+    bpos = safe_append(buf, bpos, sizeof(buf), "\"");
+  }
+#endif
+
   /* Stack trace, pretty-printed. */
   bpos = safe_append(buf, bpos, sizeof(buf), ",\"crash.stack_trace\":\"");
   bpos = safe_append(buf, bpos, sizeof(buf), "signal ");
@@ -723,6 +734,9 @@ static void scout_signal_action(int sig, siginfo_t *info, void *uap) {
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.os_version", g_os_version);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.os_build", g_os_build);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.kernel_version", g_kernel_release);
+  if (g_build_fingerprint[0] != '\0') {
+    bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.build_fingerprint", g_build_fingerprint);
+  }
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.application_version", g_bundle_version);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.app_version", g_bundle_version);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.bundle_version", g_bundle_version);
@@ -790,10 +804,15 @@ static void scout_signal_action(int sig, siginfo_t *info, void *uap) {
     bpos = append_int_field(buf, bpos, sizeof(buf), "crash.binary_images_count", (long)images_count);
   }
 
-  /* Breadcrumb trail. */
+  /* Breadcrumb trail. Skip entirely if it would overflow the buffer
+     (truncating mid-string would produce invalid JSON that the Java drain
+     silently drops). */
   if (g_breadcrumbs[0] != '\0') {
-    bpos = safe_append(buf, bpos, sizeof(buf), ",\"crash.breadcrumbs\":");
-    bpos = safe_append(buf, bpos, sizeof(buf), g_breadcrumbs);
+    int needed = 21 + (int)strlen(g_breadcrumbs) + 2; /* ',"crash.breadcrumbs":' + value + '}' + NUL */
+    if (bpos + needed < (int)sizeof(buf)) {
+      bpos = safe_append(buf, bpos, sizeof(buf), ",\"crash.breadcrumbs\":");
+      bpos = safe_append(buf, bpos, sizeof(buf), g_breadcrumbs);
+    }
   }
 
   bpos = safe_append(buf, bpos, sizeof(buf), "}");
@@ -986,5 +1005,12 @@ Java_io_base14_scoutreact_ScoutNdkSignalHandler_setSessionCounters(
   (void)cls;
   atomic_store(&g_sessions_since_launch, sinceLaunch);
   atomic_store(&g_sessions_since_last_crash, sinceLastCrash);
+}
+
+JNIEXPORT void JNICALL
+Java_io_base14_scoutreact_ScoutNdkSignalHandler_setBuildFingerprint(
+    JNIEnv *env, jclass cls, jstring fingerprint) {
+  (void)cls;
+  copy_jstring_field(env, fingerprint, g_build_fingerprint, sizeof(g_build_fingerprint));
 }
 

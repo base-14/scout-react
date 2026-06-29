@@ -50,6 +50,14 @@ object ScoutNdkSignalHandler {
     }
   }
 
+  fun setBuildFingerprintIfLoaded(fingerprint: String) {
+    if (!loaded) return
+    try {
+      setBuildFingerprint(fingerprint)
+    } catch (_: Throwable) {
+    }
+  }
+
   fun setExtendedContextIfLoaded(
     appName: String,
     deviceAppHash: String,
@@ -189,4 +197,7 @@ object ScoutNdkSignalHandler {
 
   @JvmStatic
   external fun setSessionContext(sessionId: String, sessionStartedAt: String)
+
+  @JvmStatic
+  external fun setBuildFingerprint(fingerprint: String)
 }

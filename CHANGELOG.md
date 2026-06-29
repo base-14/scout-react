@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-30
+
+### Added
+
+- **`crash.build_fingerprint` on Android NDK signal-handler crashes.**
+  Captures `Build.FINGERPRINT` (ROM identifier) via JNI from the Java
+  layer; emitted on every `native_crash` span produced from the NDK
+  signal handler. Matches scout-flutter's NDK report.
+- **`crash.exception_register` on Android NDK signal-handler crashes
+  (arm64).** Dumps `x16` and `x17` from `ucontext->uc_mcontext.regs`
+  in the signal handler so PAC/BTI faults and indirect-branch failures
+  can be diagnosed. Other architectures emit no `exception_register`.
+- **`crash.app_id` on iOS KSCrash reports.** Aliases the existing
+  `crash.bundle_id` to the `crash.app_id` attribute KSCrash already
+  exposes, so downstream consumers can read either name. Matches
+  scout-flutter's KSCrash mapping.
+- **`crash.stack_trace` and `crash.app_version` on iOS MetricKit
+  crash/hang reports.** Mirrors `crash.callstack_tree_json` and the
+  existing application-version attribute under canonical names used
+  by the dashboard.
+
+### Changed
+
+- **`crash.type` on iOS KSCrash reports now carries the actual error
+  type** (`mach`, `signal`, `nsexception`, `cppexception`) instead of
+  the literal `"kscrash"`. The previous value was an internal source
+  tag rather than a useful diagnostic.
+
+### Fixed
+
+- **NDK signal-handler crash reports were silently dropped on Android
+  when breadcrumbs filled the 32 KiB write buffer.** The handler used
+  `safe_append` to write the breadcrumb blob, which truncated mid-string
+  and produced invalid JSON; Android's `JSONObject` parse then failed
+  and the entire report was dropped on the next launch. The handler
+  now skips the breadcrumbs field entirely when it would not fit,
+  preserving the rest of the report (signal context, register dump,
+  binary images, session id, etc.).
+
 ## [0.1.10] - 2026-06-29
 
 ### Added

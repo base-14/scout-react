@@ -278,6 +278,7 @@ private final class ScoutMetricKitCollector: NSObject, MXMetricManagerSubscriber
     if let tr = d.terminationReason { report["crash.termination_reason"] = tr }
     if let ver = d.applicationVersion as String? {
       report["crash.application_version"] = ver
+      report["crash.app_version"] = ver
     }
     report["crash.os_version"] = d.metaData.osVersion
     report["crash.device_type"] = d.metaData.deviceType
@@ -287,8 +288,9 @@ private final class ScoutMetricKitCollector: NSObject, MXMetricManagerSubscriber
       ISO8601DateFormatter().string(from: payload.timeStampBegin)
     report["crash.diagnostic_payload_time_end"] =
       ISO8601DateFormatter().string(from: payload.timeStampEnd)
-    report["crash.callstack_tree_json"] =
-      d.callStackTree.jsonRepresentation().base64EncodedString()
+    let mxcStack = d.callStackTree.jsonRepresentation().base64EncodedString()
+    report["crash.callstack_tree_json"] = mxcStack
+    report["crash.stack_trace"] = mxcStack
     report["crash.callstack_tree_encoding"] = "base64"
     persist(report, prefix: "mxc")
   }
@@ -306,11 +308,13 @@ private final class ScoutMetricKitCollector: NSObject, MXMetricManagerSubscriber
     report["crash.hang_duration_ms"] = hangMs
     if let ver = d.applicationVersion as String? {
       report["crash.application_version"] = ver
+      report["crash.app_version"] = ver
     }
     report["crash.os_version"] = d.metaData.osVersion
     report["crash.device_type"] = d.metaData.deviceType
-    report["crash.callstack_tree_json"] =
-      d.callStackTree.jsonRepresentation().base64EncodedString()
+    let mxhStack = d.callStackTree.jsonRepresentation().base64EncodedString()
+    report["crash.callstack_tree_json"] = mxhStack
+    report["crash.stack_trace"] = mxhStack
     report["crash.callstack_tree_encoding"] = "base64"
     persist(report, prefix: "mxh")
   }

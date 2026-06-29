@@ -326,6 +326,10 @@ private object ScoutNativeContextPusher {
       buildType = buildType,
       abi = abi,
     )
+    val fingerprint = Build.FINGERPRINT ?: ""
+    if (fingerprint.isNotEmpty()) {
+      ScoutNdkSignalHandler.setBuildFingerprintIfLoaded(fingerprint)
+    }
   }
 
   private fun pushExtendedContext(ctx: Context) {
