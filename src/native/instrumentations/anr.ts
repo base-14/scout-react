@@ -1,6 +1,7 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+import { getCurrentScreen } from './navigation';
 export function installNativeAnrDetector(scout: Scout, thresholdMs: number): () => void {
   const INTERVAL_MS = 1000;
   let lastBeat = Date.now();
@@ -10,13 +11,12 @@ export function installNativeAnrDetector(scout: Scout, thresholdMs: number): () 
     lastBeat = now;
     if (lag > thresholdMs) {
       try {
-        const common = scout.commonAttributes();
-        const screen = (common as any)[ATTR.SCREEN_NAME];
+        const screen = getCurrentScreen();
         scout.emitSpan(SPAN.ANR, {
           [ATTR.ANR_DURATION]: lag / 1000,
           [ATTR.ANR_THRESHOLD]: thresholdMs / 1000,
           ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
-          ...common,
+          ...scout.commonAttributes(),
         });
         scout.addBreadcrumb(
           BREADCRUMB_TYPE.ANR,

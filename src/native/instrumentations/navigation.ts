@@ -7,6 +7,10 @@ let RN: any = null;
 try {
   RN = withSuppression(() => require('react-native'));
 } catch {}
+let activeScreen: string | null = null;
+export function getCurrentScreen(): string | null {
+  return activeScreen;
+}
 interface NavigationRef {
   getCurrentRoute?: () =>
     | {
@@ -19,12 +23,17 @@ export function installNativeNavigationTracker(
   scout: Scout,
   navigationRef: NavigationRef,
 ): () => void {
-  let currentScreen = navigationRef.getCurrentRoute?.()?.name ?? 'unknown';
+  const initialName = navigationRef.getCurrentRoute?.()?.name;
+  let currentScreen = initialName ?? 'unknown';
+  activeScreen = currentScreen;
+  scout.setCurrentScreen(currentScreen);
   let previousScreen = '';
-  let enterAt = Date.now();
+  const initialNavStartMs = Date.now();
+  let enterAt = initialNavStartMs;
   let isFirstScreen = true;
   startScreen(currentScreen);
   scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${currentScreen}`);
+  if (initialName) emitScreenLoad(initialName, initialNavStartMs);
   if (!navigationRef.addListener) return () => {};
   const unsub = navigationRef.addListener('state', () => {
     const next = navigationRef.getCurrentRoute?.()?.name;
@@ -52,11 +61,15 @@ export function installNativeNavigationTracker(
         ...scout.commonAttributes(),
       });
     }
+    const navStartMs = Date.now();
     previousScreen = currentScreen;
     currentScreen = next;
-    enterAt = Date.now();
+    activeScreen = next;
+    scout.setCurrentScreen(next);
+    enterAt = navStartMs;
     startScreen(next);
     scout.addBreadcrumb(BREADCRUMB_TYPE.NAVIGATION, `screen: ${next}`);
+    emitScreenLoad(next, navStartMs);
   });
   let appStateSub:
     | {
@@ -70,6 +83,8 @@ export function installNativeNavigationTracker(
           const name = navigationRef.getCurrentRoute?.()?.name;
           if (name) {
             currentScreen = name;
+            activeScreen = name;
+            scout.setCurrentScreen(name);
             enterAt = Date.now();
             startScreen(name);
           }
@@ -93,5 +108,16 @@ export function installNativeNavigationTracker(
       ...(previousScreen ? { [ATTR.VIEW_REFERRER]: previousScreen } : {}),
       [ATTR.VIEW_IS_ACTIVE]: true,
     });
+  }
+  function emitScreenLoad(name: string, startMs: number) {
+    setTimeout(() => {
+      const loadSec = (Date.now() - startMs) / 1000;
+      scout.emitSpan(SPAN.SCREEN_LOAD, {
+        [ATTR.SCREEN_NAME]: name,
+        [ATTR.SCREEN_LOAD_TIME]: loadSec,
+        [ATTR.VIEW_LOADING_TIME_MS]: Math.round(loadSec * 1000),
+        ...scout.commonAttributes(),
+      });
+    }, 0);
   }
 }

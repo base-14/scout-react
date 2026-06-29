@@ -228,6 +228,13 @@ export class Scout {
   private readonly _appStartedAt = Date.now();
   private _lastInteractionAt: number = 0;
   private _lastInteractionScreen: string | null = null;
+  private _currentScreen: string | null = null;
+  setCurrentScreen(name: string | null): void {
+    this._currentScreen = name && name.length > 0 ? name : null;
+  }
+  get currentScreen(): string | null {
+    return this._currentScreen;
+  }
   markInteraction(screen?: string | null): void {
     this._lastInteractionAt = Date.now();
     this._lastInteractionScreen = screen ?? this._lastInteractionScreen;
@@ -254,6 +261,7 @@ export class Scout {
     if (sid) attrs[ATTR.SESSION_ID] = sid;
     const startIso = this.session.startedAtIso;
     if (startIso) attrs[ATTR.SESSION_START_TIME] = startIso;
+    if (this._currentScreen) attrs[ATTR.SCREEN_NAME] = this._currentScreen;
     const uid = this.user.id;
     if (uid) attrs[ATTR.USER_ID] = uid;
     for (const [k, v] of Object.entries(this.user.attributes)) {
@@ -516,6 +524,7 @@ export class Scout {
       span.setStatus({ code: SpanStatusCode.ERROR });
     }
     span.end(opts.endTime);
+    this.debug('emit', name, filtered.attributes[ATTR.SCREEN_NAME] ?? '(no-screen)');
     this.session.touch();
     this.bumpViewCounter(name, filtered.attributes);
     if (this._webViewBridgeSend) {
@@ -661,7 +670,7 @@ export class Scout {
   }
   private debug(...args: unknown[]): void {
     if (this._config.debug) {
-      console.warn('[scout]', ...args);
+      console.log('[scout]', ...args);
     }
   }
 }

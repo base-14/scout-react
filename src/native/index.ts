@@ -141,7 +141,7 @@ export const Scout = {
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.traces,
+      { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
     const traceProvider = new BasicTracerProvider({
       resource,
@@ -162,7 +162,7 @@ export const Scout = {
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.metrics,
+      { ...offline.hooks.metrics, debug: !!resolved.debug, label: 'metrics' },
     );
     const meterProvider = new MeterProvider({
       resource,
@@ -185,7 +185,7 @@ export const Scout = {
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.logs,
+      { ...offline.hooks.logs, debug: !!resolved.debug, label: 'logs' },
     );
     const loggerProvider = new LoggerProvider({
       resource,

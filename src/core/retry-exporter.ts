@@ -5,6 +5,8 @@ interface RetryableExporter {
 }
 export interface RetryHooks {
   onFailedAfterRetries?: (items: unknown) => void;
+  debug?: boolean;
+  label?: string;
 }
 export function wrapWithRetry<E extends RetryableExporter>(
   exporter: E,
@@ -13,16 +15,33 @@ export function wrapWithRetry<E extends RetryableExporter>(
 ): E {
   if (opts.maxRetries <= 0) return exporter;
   const originalExport = exporter.export.bind(exporter);
+  const label = hooks.label ?? 'export';
   (exporter as RetryableExporter).export = function (
     items: unknown,
     callback: (result: ExportResult) => void,
   ): void {
     let attempt = 0;
+    const count = Array.isArray(items) ? items.length : 1;
     const tryOnce = (): void => {
+      if (hooks.debug)
+        console.log('[scout]', label, 'attempt', attempt + 1, 'items', count);
       originalExport(items, (result: ExportResult) => {
         if (result.code === ExportResultCode.SUCCESS) {
+          if (hooks.debug) console.log('[scout]', label, 'OK items=' + count);
           callback(result);
           return;
+        }
+        if (hooks.debug) {
+          console.warn(
+            '[scout]',
+            label,
+            'FAIL',
+            String(
+              (result.error as { message?: string })?.message ??
+                result.error ??
+                'unknown',
+            ),
+          );
         }
         if (attempt >= opts.maxRetries || !isRetryableError(result.error)) {
           if (isRetryableError(result.error) && hooks.onFailedAfterRetries) {

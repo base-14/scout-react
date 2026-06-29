@@ -3,16 +3,19 @@ import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import type { Attributes } from '../../core/types';
 import { uuidv4 } from '../../core/uuid';
+import { getCurrentScreen } from './route';
 export function installLongTaskTracker(scout: Scout, thresholdMs: number): () => void {
   if (typeof PerformanceObserver === 'undefined') return () => {};
   const observers: PerformanceObserver[] = [];
   const emit = (dur: number, extras: Attributes, entryType: string) => {
     const seconds = dur / 1000;
+    const screen = getCurrentScreen();
     scout.emitSpan(SPAN.LONG_TASK, {
       [ATTR.LONG_TASK_ID]: uuidv4(),
       [ATTR.LONG_TASK_DURATION]: seconds,
       [ATTR.LONG_TASK_THRESHOLD]: thresholdMs / 1000,
       [ATTR.LONG_TASK_ENTRY_TYPE]: entryType,
+      ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
       ...extras,
       ...scout.commonAttributes(),
     });
@@ -20,6 +23,7 @@ export function installLongTaskTracker(scout: Scout, thresholdMs: number): () =>
     if (dur >= 700) {
       scout.emitSpan(SPAN.FROZEN_FRAME, {
         [ATTR.FROZEN_FRAME_DURATION]: seconds,
+        ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
         ...scout.commonAttributes(),
       });
       scout.addBreadcrumb(BREADCRUMB_TYPE.FROZEN_FRAME, `${Math.round(dur)}ms`);

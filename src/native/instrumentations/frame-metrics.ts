@@ -2,7 +2,9 @@ import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import { METRIC } from '../../core/metrics';
 import type { Scout } from '../../core/scout';
+import type { Attributes } from '../../core/types';
 import { uuidv4 } from '../../core/uuid';
+import { getCurrentScreen } from './navigation';
 const FROZEN_FRAME_MS = 700;
 const SLOW_FRAME_MS = 16.67;
 const REPORT_INTERVAL_MS = 10000;
@@ -47,14 +49,21 @@ export function installNativeFrameMetricsTracker(
         }
       }
       if (delta > 50) {
-        scout.emitHistogram(METRIC.RN_FRAME_BUILD_TIME, delta);
+        const histScreen = getCurrentScreen();
+        scout.emitHistogram(
+          METRIC.RN_FRAME_BUILD_TIME,
+          delta,
+          histScreen ? { [ATTR.SCREEN_NAME]: histScreen } : {},
+        );
         if (delta > 32) droppedSinceLastReport++;
         if (delta > longTaskThresholdMs) {
           const seconds = delta / 1000;
+          const screen = getCurrentScreen();
           scout.emitSpan(SPAN.LONG_TASK, {
             [ATTR.LONG_TASK_ID]: uuidv4(),
             [ATTR.LONG_TASK_DURATION]: seconds,
             [ATTR.LONG_TASK_THRESHOLD]: longTaskThresholdMs / 1000,
+            ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
             ...scout.commonAttributes(),
           });
           scout.addBreadcrumb(
@@ -65,6 +74,7 @@ export function installNativeFrameMetricsTracker(
             frozenMsInWindow += delta;
             scout.emitSpan(SPAN.FROZEN_FRAME, {
               [ATTR.FROZEN_FRAME_DURATION]: seconds,
+              ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
               ...scout.commonAttributes(),
             });
             scout.addBreadcrumb(
@@ -79,19 +89,37 @@ export function installNativeFrameMetricsTracker(
     raf(tick);
   };
   const reportTimer = setInterval(() => {
+    const reportScreen = getCurrentScreen();
+    const screenAttr: Attributes = reportScreen
+      ? { [ATTR.SCREEN_NAME]: reportScreen }
+      : {};
     if (droppedSinceLastReport > 0) {
-      scout.emitGauge(METRIC.RN_FRAME_DROPPED, droppedSinceLastReport);
+      scout.emitGauge(METRIC.RN_FRAME_DROPPED, droppedSinceLastReport, screenAttr);
       droppedSinceLastReport = 0;
     }
     if (frameCountWindow > 0) {
       const avgDelta = REPORT_INTERVAL_MS / frameCountWindow;
       const avgFps = 1000 / avgDelta;
       const minFps = isFinite(minDeltaInWindow) ? 1000 / minDeltaInWindow : avgFps;
-      scout.emitGauge(METRIC.RN_FRAME_REFRESH_RATE, avgFps, { agg: 'average' });
-      scout.emitGauge(METRIC.RN_FRAME_REFRESH_RATE, minFps, { agg: 'min' });
-      scout.emitGauge(METRIC.RN_FRAME_JS_REFRESH_RATE, avgFps);
-      scout.emitGauge(METRIC.RN_FRAME_SLOW_FRAMES_RATE, slowFrameMsInWindow / 10);
-      scout.emitGauge(METRIC.RN_FRAME_FREEZE_RATE, (frozenMsInWindow / 1000) * 360);
+      scout.emitGauge(METRIC.RN_FRAME_REFRESH_RATE, avgFps, {
+        agg: 'average',
+        ...screenAttr,
+      });
+      scout.emitGauge(METRIC.RN_FRAME_REFRESH_RATE, minFps, {
+        agg: 'min',
+        ...screenAttr,
+      });
+      scout.emitGauge(METRIC.RN_FRAME_JS_REFRESH_RATE, avgFps, screenAttr);
+      scout.emitGauge(
+        METRIC.RN_FRAME_SLOW_FRAMES_RATE,
+        slowFrameMsInWindow / 10,
+        screenAttr,
+      );
+      scout.emitGauge(
+        METRIC.RN_FRAME_FREEZE_RATE,
+        (frozenMsInWindow / 1000) * 360,
+        screenAttr,
+      );
     }
     try {
       const root = scout.rootSpan;

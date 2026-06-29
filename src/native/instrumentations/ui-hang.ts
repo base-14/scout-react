@@ -2,6 +2,7 @@ import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { withSuppression } from '../soft-load';
+import { getCurrentScreen } from './navigation';
 let RN: any = null;
 try {
   RN = withSuppression(() => require('react-native'));
@@ -37,9 +38,11 @@ export async function installUiHangDetector(
     const durationSec = durationMs / 1000;
     const thresholdSec = Number(payload?.thresholdMs ?? thresholdMs) / 1000;
     try {
+      const screen = getCurrentScreen();
       scout.emitSpan(SPAN.UI_HANG, {
         [ATTR.UI_HANG_DURATION]: durationSec,
         [ATTR.UI_HANG_THRESHOLD]: thresholdSec,
+        ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
         ...scout.commonAttributes(),
       });
       scout.breadcrumbsManager.add(BREADCRUMB_TYPE.ANR, `UI hang: ${durationMs}ms`);

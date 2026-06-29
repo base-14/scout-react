@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`screen_load` span on React Native navigation transitions.** Emitted
+  by `installNativeNavigationTracker` on every screen change (and on
+  initial mount when React Navigation's `getCurrentRoute()` returns a
+  name), carrying `screen.name`, `screen.load_time` (seconds), and
+  `view.loading_time_ms` (int). Backs the dashboard's per-screen
+  Avg/P95 Load Time, Load Time Trend, and Slowest Loads panels.
+  Mirrors scout-flutter's `onScreenLoadTime` callback.
+  Note: the span is emitted as instantaneous (no OTel `Duration`);
+  dashboard queries should read `SpanAttributes['screen.load_time']`
+  (multiplied by 1000 for ms) rather than `Duration/1e6`. Explicit
+  `startTime`/`endTime` on `emitSpan` triggered an OTel JS quirk that
+  silently dropped the span.
+- **`Scout.setCurrentScreen(name)` public API.** Lets host code (or the
+  built-in route trackers) set the active screen so every subsequent
+  span/metric/log carries `screen.name` via `commonAttributes()`.
+- **Per-emit + per-export debug logs when `debug: true`.** `[scout] emit
+  <span> <screen>` for every emitted span and `[scout] <traces|metrics|logs>
+  attempt N items=K → OK/FAIL ...` for every export attempt. Helps confirm
+  the SDK is actually exporting to the configured endpoint.
+
+### Fixed
+
+- **Every span and metric now carries `screen.name` when a screen is
+  active.** Previously, the closure-local `currentScreen` in
+  `navigation.ts` / `route.ts` was inaccessible to other instrumentations,
+  so `long_task` (1849 affected per dashboard analysis), `user_interaction`
+  (126), `http.request` (334), `app_startup` (39), `error` (66),
+  `frozen_frame` (186), `ui_hang`, `anr` (153), and `native_crash` spans
+  all emitted without screen attribution. Same for `react_native.frame.*`
+  metrics. Fixed centrally: `Scout.setCurrentScreen(name)` is called by
+  `installNativeNavigationTracker` / `installRouteTracker` on every screen
+  transition; `Scout.commonAttributes()` stamps `screen.name` on every
+  span/metric/log spread automatically. Mirrors scout-flutter's
+  `_currentScreenName` static field pattern.
+- **`anr.ts` was reading screen name from `commonAttributes()` which never
+  carried it.** The lookup at `(common as any)[ATTR.SCREEN_NAME]` was
+  always undefined. Now obsolete — `commonAttributes()` carries it
+  natively.
+
 ## [0.1.9] - 2026-06-15
 
 ### Added

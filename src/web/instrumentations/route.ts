@@ -2,11 +2,17 @@ import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { uuidv4 } from '../../core/uuid';
+let activeScreen: string | null = null;
+export function getCurrentScreen(): string | null {
+  return activeScreen;
+}
 export function installRouteTracker(scout: Scout): () => void {
   if (typeof window === 'undefined' || typeof history === 'undefined') {
     return () => {};
   }
   let currentScreen = locationToScreen();
+  activeScreen = currentScreen;
+  scout.setCurrentScreen(currentScreen);
   let previousScreen = '';
   let enterTimeMs = performance.now();
   let isFirstScreen = true;
@@ -26,6 +32,8 @@ export function installRouteTracker(scout: Scout): () => void {
     );
     previousScreen = currentScreen;
     currentScreen = next;
+    activeScreen = next;
+    scout.setCurrentScreen(next);
     enterTimeMs = performance.now();
     startScreenSpan(currentScreen);
   };

@@ -1,6 +1,7 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+import { getCurrentScreen } from './route';
 const MARKER_KEY = 'scout.session-marker';
 interface Marker {
   sessionId: string;
@@ -70,6 +71,8 @@ export function installCrashDetector(scout: Scout): () => void {
   };
 }
 function getLastScreen(): string {
+  const screen = getCurrentScreen();
+  if (screen) return screen;
   if (typeof location === 'undefined') return '';
   return location.pathname + (location.hash ?? '');
 }
