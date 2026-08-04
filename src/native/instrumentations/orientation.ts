@@ -21,7 +21,6 @@ function computeOrientation(): string | null {
 
 export function installOrientationTracker(scout: Scout): () => void {
   const initial = computeOrientation();
-  // eslint-disable-next-line no-console
   if ((scout.config as { debug?: boolean }).debug) {
     console.log(
       '[scout]',

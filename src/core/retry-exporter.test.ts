@@ -101,6 +101,42 @@ describe('wrapWithRetry', () => {
     expect(cb).toHaveBeenCalledTimes(1);
     expect(cb.mock.calls[0]![0].code).toBe(ExportResultCode.FAILED);
   });
+  it('makes exactly 3 attempts at maxRetries=2, then drops', async () => {
+    const inner = vi.fn((_items: unknown, cb: (r: ExportResult) => void) =>
+      cb({ code: ExportResultCode.FAILED, error: new Error('network error') }),
+    );
+    const wrapped = wrapWithRetry({ export: inner } as MockExporter, {
+      maxRetries: 2,
+      initialDelayMs: 10,
+      maxDelayMs: 100,
+    });
+    const cb = vi.fn();
+    wrapped.export([{}], cb);
+    await vi.runAllTimersAsync();
+    expect(inner).toHaveBeenCalledTimes(3);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+  it('still wraps at maxRetries=0 when an offline hook is present, and feeds it', () => {
+    // Regression: the wrapper used to return the exporter untouched at zero
+    // retries, so `onFailedAfterRetries` never fired — which silently killed
+    // offline buffering once at-most-once became the default.
+    const inner = vi.fn((_items: unknown, cb: (r: ExportResult) => void) =>
+      cb({ code: ExportResultCode.FAILED, error: { status: 503 } as Error }),
+    );
+    const onFailedAfterRetries = vi.fn();
+    const exporter: MockExporter = { export: inner };
+    const wrapped = wrapWithRetry(
+      exporter,
+      { maxRetries: 0, initialDelayMs: 10, maxDelayMs: 100 },
+      { onFailedAfterRetries },
+    );
+    const cb = vi.fn();
+    wrapped.export([{ span: 1 }], cb);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(onFailedAfterRetries).toHaveBeenCalledTimes(1);
+    expect(onFailedAfterRetries).toHaveBeenCalledWith([{ span: 1 }]);
+    expect(cb.mock.calls[0]![0].code).toBe(ExportResultCode.FAILED);
+  });
   it('is a no-op pass-through when maxRetries=0', () => {
     const inner = vi.fn((_items: unknown, cb: (r: ExportResult) => void) =>
       cb({ code: ExportResultCode.FAILED, error: new Error('network error') }),

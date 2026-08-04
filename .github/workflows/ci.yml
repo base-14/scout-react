@@ -35,10 +35,42 @@ jobs:
       - name: audit (production deps only)
         run: npm audit --omit=dev --audit-level=high
 
+      # `make ci` runs plain `vitest run`, which writes no coverage/ — so the
+      # report has to be produced explicitly for the upload below to have
+      # anything to collect.
+      - name: coverage
+        if: matrix.node == '22'
+        run: make test-coverage
+
       - name: upload coverage
         if: matrix.node == '22'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage/
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+  android-unit-tests:
+    name: android unit tests (kotlin)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The Android library itself needs a host app's Gradle build (it depends
+      # on :expo-modules-core), so this project compiles only the Android-free
+      # decision cores — exit-info classification and ANR hang detection.
+      # Gradle's version comes from the checked-in wrapper, so CI and
+      # `make test-android` run the identical toolchain.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      - name: kotlin unit tests
+        run: ./gradlew test --console=plain
+        working-directory: android/unit-tests

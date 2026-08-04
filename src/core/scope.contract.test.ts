@@ -22,6 +22,15 @@ describe('SCOPE contract — every span/metric/log must use the SDK scope', () =
     expect(SCOPE_NAME).toBe('base14.scout.react');
     expect(SCOPE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
+  it('pins SCOPE_VERSION to the package version', () => {
+    // SCOPE_VERSION is the scope version on every signal AND the value of the
+    // `scout.react.version` resource attribute, so a drift from package.json
+    // mislabels which SDK build produced the telemetry. Bump both together.
+    const pkg = JSON.parse(
+      readFileSync(join(SRC_ROOT, '..', 'package.json'), 'utf8'),
+    ) as { version: string };
+    expect(SCOPE_VERSION).toBe(pkg.version);
+  });
   it('forbids any other InstrumentationScope name anywhere in src/', () => {
     const violations: Array<{
       file: string;

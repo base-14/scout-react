@@ -82,6 +82,8 @@ Scout.registerRootComponent(App);
 
 `registerRootComponent` installs a root-level error + touch boundary via RN's `AppRegistry.setWrapperComponentProvider`. Every tap becomes a `user_interaction` span, every render error becomes an `error` span (with `error.component_stack`), automatically.
 
+> **Running the native entry under plain Node** (Jest without a React Native preset, SSR, scripts) — use the named export, `import { Scout } from '@base-14/scout-react/native'`. `dist/native` is CommonJS so Metro can see literal `require()`s; Node's ESM interop does not honour its `__esModule` marker, so the default import resolves to the module namespace rather than the class. Metro and Babel handle the default import correctly, so app code is unaffected.
+
 Then in your `App.tsx`:
 
 ```tsx

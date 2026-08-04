@@ -1,6 +1,10 @@
 import { METRIC } from '../../core/metrics';
 import type { Scout } from '../../core/scout';
-export function installMemoryTracker(scout: Scout): () => void {
+const DEFAULT_SAMPLE_INTERVAL_MS = 60000;
+export function installMemoryTracker(
+  scout: Scout,
+  sampleIntervalMs: number = DEFAULT_SAMPLE_INTERVAL_MS,
+): () => void {
   if (typeof performance === 'undefined') return () => {};
   const perf = performance as Performance & {
     memory?: {
@@ -15,6 +19,6 @@ export function installMemoryTracker(scout: Scout): () => void {
     } catch {}
   };
   tick();
-  const id = setInterval(tick, 10000);
+  const id = setInterval(tick, sampleIntervalMs);
   return () => clearInterval(id);
 }

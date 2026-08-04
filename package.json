@@ -1,12 +1,12 @@
 {
   "name": "@base-14/scout-react",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Zero-config OpenTelemetry RUM for React and React Native. Auto-captures clicks, navigation, errors, lifecycle, network, performance, and web vitals.",
   "license": "MIT",
   "author": "base-14",
   "repository": {
     "type": "git",
-    "url": "https://github.com/base-14/scout-react.git"
+    "url": "git+https://github.com/base-14/scout-react.git"
   },
   "type": "module",
   "main": "./dist/web/index.cjs",
@@ -15,10 +15,15 @@
   "types": "./dist/web/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/web/index.d.ts",
       "react-native": "./dist/native/index.js",
-      "import": "./dist/web/index.js",
-      "require": "./dist/web/index.cjs"
+      "import": {
+        "types": "./dist/web/index.d.ts",
+        "default": "./dist/web/index.js"
+      },
+      "require": {
+        "types": "./dist/web/index.d.cts",
+        "default": "./dist/web/index.cjs"
+      }
     },
     "./native": {
       "types": "./dist/native/index.d.ts",
@@ -26,11 +31,32 @@
       "default": "./dist/native/index.js"
     },
     "./react": {
-      "types": "./dist/web/react/index.d.ts",
-      "import": "./dist/web/react/index.js",
-      "require": "./dist/web/react/index.cjs"
+      "import": {
+        "types": "./dist/web/react/index.d.ts",
+        "default": "./dist/web/react/index.js"
+      },
+      "require": {
+        "types": "./dist/web/react/index.d.cts",
+        "default": "./dist/web/react/index.cjs"
+      }
     },
-    "./babel-plugin": "./babel-plugin/index.cjs"
+    "./babel-plugin": {
+      "types": "./babel-plugin/index.d.cts",
+      "default": "./babel-plugin/index.cjs"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "native": [
+        "./dist/native/index.d.ts"
+      ],
+      "react": [
+        "./dist/web/react/index.d.ts"
+      ],
+      "babel-plugin": [
+        "./babel-plugin/index.d.cts"
+      ]
+    }
   },
   "files": [
     "dist",
@@ -43,7 +69,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.native.json",
+    "build": "tsup && tsc -p tsconfig.native.json && node scripts/write-native-cjs-marker.mjs",
     "test": "vitest run",
     "prepare": "npm run build"
   },
@@ -66,9 +92,7 @@
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.218.0",
     "@opentelemetry/core": "^2.7.1",
-    "@opentelemetry/exporter-logs-otlp-http": "^0.218.0",
-    "@opentelemetry/exporter-metrics-otlp-http": "^0.218.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
+    "@opentelemetry/otlp-transformer": "^0.218.0",
     "@opentelemetry/resources": "^2.7.1",
     "@opentelemetry/sdk-logs": "^0.218.0",
     "@opentelemetry/sdk-metrics": "^2.7.1",
@@ -98,6 +122,7 @@
     }
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@eslint/js": "^9.0.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -112,6 +137,7 @@
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.1.1",
     "prettier": "^3.8.3",
+    "publint": "^0.3.22",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tsup": "^8.3.0",

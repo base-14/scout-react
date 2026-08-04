@@ -40,6 +40,9 @@ android/build/
 android/.cxx/
 android/.gradle/
 android/local.properties
+android/unit-tests/build/
+android/unit-tests/.gradle/
+android/unit-tests/.kotlin/
 ios/build/
 ios/Pods/
 ios/*.xcworkspace/

@@ -7,10 +7,11 @@ import { uuidv4 } from '../../core/uuid';
 import { getCurrentScreen } from './navigation';
 const FROZEN_FRAME_MS = 700;
 const SLOW_FRAME_MS = 16.67;
-const REPORT_INTERVAL_MS = 10000;
+const DEFAULT_REPORT_INTERVAL_MS = 60000;
 export function installNativeFrameMetricsTracker(
   scout: Scout,
   longTaskThresholdMs: number,
+  reportIntervalMs: number = DEFAULT_REPORT_INTERVAL_MS,
 ): () => void {
   const raf: ((cb: (t: number) => void) => number) | undefined = (globalThis as any)
     .requestAnimationFrame;
@@ -98,7 +99,7 @@ export function installNativeFrameMetricsTracker(
       droppedSinceLastReport = 0;
     }
     if (frameCountWindow > 0) {
-      const avgDelta = REPORT_INTERVAL_MS / frameCountWindow;
+      const avgDelta = reportIntervalMs / frameCountWindow;
       const avgFps = 1000 / avgDelta;
       const minFps = isFinite(minDeltaInWindow) ? 1000 / minDeltaInWindow : avgFps;
       scout.emitGauge(METRIC.RN_FRAME_REFRESH_RATE, avgFps, {
@@ -134,7 +135,7 @@ export function installNativeFrameMetricsTracker(
     minDeltaInWindow = Number.POSITIVE_INFINITY;
     slowFrameMsInWindow = 0;
     frozenMsInWindow = 0;
-  }, REPORT_INTERVAL_MS);
+  }, reportIntervalMs);
   raf(tick);
   return () => {
     stopped = true;

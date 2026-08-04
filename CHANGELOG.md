@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-03
+
+Brings scout-react to parity with scout-flutter 0.1.23's production-hardening
+work. **This release changes defaults.** Upgrading without action silently
+turns off periodic vitals metrics, export retries and offline buffering, and
+slows trace/log export from 5s to 30s. All of it is opt-in-able — see below.
+
+### Changed — behavior (action required)
+
+- **Vitals metrics are now opt-in.** `enableFrameMetrics`, `enableMemoryMetrics`
+  and `enableCpuMetrics` default to `false` (were `true`). These are the
+  highest-volume signals the SDK produces. A default `Scout.initialize()` now
+  emits **no periodic metrics at all**. Restore with
+  `{ enableFrameMetrics: true, enableMemoryMetrics: true, enableCpuMetrics: true }`.
+- **Delivery is at-most-once.** `exportRetry.maxRetries` defaults to `0` (was
+  `3`) and `offlineBuffer.enabled` to `false` (was `true`, with 5000/2000/5000
+  item caps now `0`). Retrying an ambiguous failure — a timeout the collector
+  may already have ingested — re-delivers identical span IDs; no duplicates is
+  worth more than lossless delivery for RUM data. Restore with
+  `{ exportRetry: { maxRetries: 3 }, offlineBuffer: { enabled: true, maxItems: {...} } }`.
+- **Export cadence is 30s for all signals** (traces and logs were 5s; metrics
+  unchanged at 30s). Tune with `exportIntervalSeconds`.
+- **Vitals sampling is 60s** (memory/CPU/frame were 10s). Tune with
+  `vitalsCollectionIntervalSeconds`.
+- **Android exit-info records are no longer all crashes.** Only `REASON_CRASH`,
+  `REASON_CRASH_NATIVE`, `REASON_ANR` and `REASON_LOW_MEMORY` are reported.
+  Swipe-from-recents, Force Stop, self-exit, `REASON_SIGNALED`,
+  `REASON_EXCESSIVE_RESOURCE_USAGE` and `REASON_INITIALIZATION_FAILURE` are
+  normal process exits and are dropped — they were inflating crash counts with
+  ordinary user actions.
+- **`crash.type` on exit-info records now carries the real reason**
+  (`jvm_crash`, `native_crash`, `anr`, `low_memory`) instead of the constant
+  `"exit_info"`. **Dashboards filtering `crash.type = 'exit_info'` must move to
+  the new `crash.source = 'exit_info'` attribute.**
+- **Breadcrumbs are session-scoped.** A relaunched session no longer inherits
+  the previous session's breadcrumb trail; those crumbs are attached to crash
+  reports drained from the session that died instead.
+- **`app_crash` is attributed to the crashed session.** `session.id` and
+  `session.start_time` on the span are now the dead session's, and
+  `crash.timestamp` is when the app was last known alive rather than when the
+  crash was noticed on relaunch.
+
+### Added
+
+- `exportIntervalSeconds` (default 30, min 1) — one cadence for traces, logs
+  and metrics. Per-signal `traceExportIntervalMs` / `logExportScheduledDelayMs`
+  / `metricExportIntervalMs` still win when set explicitly.
+- `metricExportIntervalSeconds` — metrics-only override.
+- `maxExportBatchSize` (512) and `maxQueueSize` (2048) — applied to the trace
+  and log processors.
+- `vitalsCollectionIntervalSeconds` (default 60, min 1) — sampling cadence for
+  memory, CPU, frame and battery vitals.
+- `scout.react.version` resource attribute on every span, metric and log, on
+  both web and native. Pinned to `package.json` by a CI contract test and not
+  overridable via `resourceAttributes`.
+- `crash.source` — which detection path produced a crash record.
+- `crash.drain_app_state`, `crash.drain_process_start_time` and
+  `crash.drain_uptime_secs` on drained native crash reports.
+- Kotlin unit tests (`android/unit-tests`, `make test-android`) covering the
+  exit-info classification and ANR hang-detection rules, plus a CI job.
+- `make check-exports` (`publint` + `arethetypeswrong`), wired into `make ci`.
+  Both pack the real tarball, so the exports map and the type-resolution matrix
+  are checked as consumers see them.
+
+### Fixed
+
+- **Duplicate exports.** The stock `@opentelemetry/exporter-*-otlp-http`
+  exporters wrap their transport in `RetryingTransport`, which re-sends up to
+  five more times on 429/502/503/504 and on network errors — stacked under the
+  SDK's own retry wrapper, one batch could reach the collector ~20 times.
+  Replaced with a fetch-based OTLP/JSON exporter where one export is exactly
+  one request; retry policy now lives in one place and is off by default.
+- **Offline buffering was silently dead at zero retries.** The retry wrapper
+  returned the exporter untouched when `maxRetries <= 0`, so the hook that
+  feeds the offline buffer never ran. It now wraps whenever a buffer or debug
+  logging is wired up.
+- **Console-capture feedback loop.** With `captureConsole` + `debug`, the SDK's
+  own `[scout]` diagnostics were captured as logs, which produced more exports,
+  which logged again. `[scout]`-prefixed lines are no longer captured.
+- **Web `crash.started_at` was the marker's write time**, not the session's
+  start time.
+- ANR detection latency: the watchdog polls every 100ms instead of
+  `threshold/10` (500ms at the default threshold), so a hang is reported at
+  threshold + ~0.1s.
+- **Subpath types were unresolvable under classic `moduleResolution: "node"`.**
+  `@base-14/scout-react/native`, `/react` and `/babel-plugin` all failed to
+  resolve types — which covers most React Native tsconfigs. Added
+  `typesVersions` mappings.
+- **CJS consumers got ESM types.** The single top-level `types` condition was
+  reused for `require`, so a CJS `import` saw ESM declarations ("masquerading
+  as ESM"). `import` and `require` now carry their own `types` pointing at
+  `.d.ts` / `.d.cts` respectively.
+- **`./native` was unloadable from Node.** `tsconfig.native.json` emits
+  CommonJS, but the root package is `"type": "module"`, so Node read
+  `dist/native/**` and `dist/core/**` as ESM and every `require` threw. Both
+  directories now carry a `{"type":"commonjs"}` marker. Metro was unaffected
+  either way; this fixes Jest, SSR and other Node-based consumers.
+- **`./babel-plugin` shipped no type declarations at all.** Added
+  `babel-plugin/index.d.cts`, including the `components` / `handlers` options.
+
+### Removed
+
+- Dependencies on `@opentelemetry/exporter-trace-otlp-http`,
+  `@opentelemetry/exporter-metrics-otlp-http` and
+  `@opentelemetry/exporter-logs-otlp-http`, replaced by a direct dependency on
+  `@opentelemetry/otlp-transformer`.
+
 ## [0.1.11] - 2026-06-30
 
 ### Added

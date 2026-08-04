@@ -45,6 +45,22 @@ export interface ScoutConfig {
   maxOfflineStorageMb?: number;
   beforeSend?: BeforeSendCallback;
   customTargetResolver?: CustomTargetResolver;
+  /**
+   * Export cadence for traces, logs AND metrics (default 30, min 1).
+   * The per-signal `*Ms` options below override it when explicitly set.
+   */
+  exportIntervalSeconds?: number;
+  /** Metrics-only override; falls back to `exportIntervalSeconds`. */
+  metricExportIntervalSeconds?: number;
+  /** Applied to the trace + log batch processors (default 512). */
+  maxExportBatchSize?: number;
+  /** Applied to the trace + log batch processors (default 2048). */
+  maxQueueSize?: number;
+  /**
+   * Sampling cadence for memory / CPU / frame / battery vitals
+   * (default 60, min 1). Only in effect when those vitals are enabled.
+   */
+  vitalsCollectionIntervalSeconds?: number;
   traceExportIntervalMs?: number;
   traceMaxQueueSize?: number;
   traceMaxExportBatchSize?: number;
@@ -116,6 +132,18 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
   const iosHangThresholdMs = iosHangRaw <= 0 ? 0 : Math.max(50, iosHangRaw);
   const sessionSampleRate = clamp(config.sessionSampleRate ?? 1, 0, 100);
   const captureConsole = config.captureConsole ?? config.capturePrintStatements ?? false;
+  const exportIntervalSeconds = Math.max(1, config.exportIntervalSeconds ?? 30);
+  const exportIntervalMs = exportIntervalSeconds * 1000;
+  const metricIntervalMs =
+    config.metricExportIntervalSeconds != null
+      ? Math.max(1, config.metricExportIntervalSeconds) * 1000
+      : exportIntervalMs;
+  const maxExportBatchSize = Math.max(1, config.maxExportBatchSize ?? 512);
+  const maxQueueSize = Math.max(1, config.maxQueueSize ?? 2048);
+  const vitalsCollectionIntervalSeconds = Math.max(
+    1,
+    config.vitalsCollectionIntervalSeconds ?? 60,
+  );
   return {
     serviceName: config.serviceName,
     endpoint: config.endpoint,
@@ -134,9 +162,11 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     enablePerformanceMetrics: config.enablePerformanceMetrics ?? true,
     enableLongTaskDetection: config.enableLongTaskDetection ?? true,
     enableAnrDetection: config.enableAnrDetection ?? true,
-    enableFrameMetrics: config.enableFrameMetrics ?? true,
-    enableMemoryMetrics: config.enableMemoryMetrics ?? true,
-    enableCpuMetrics: config.enableCpuMetrics ?? true,
+    // Opt-in: these are the highest-volume metrics the SDK can produce, and
+    // at the inherited sampling rate they dwarf every other signal.
+    enableFrameMetrics: config.enableFrameMetrics ?? false,
+    enableMemoryMetrics: config.enableMemoryMetrics ?? false,
+    enableCpuMetrics: config.enableCpuMetrics ?? false,
     maxTombstoneBytes: Math.max(4096, config.maxTombstoneBytes ?? 131072),
     enableWebVitals: config.enableWebVitals ?? true,
     enableBatteryTracking: config.enableBatteryTracking ?? true,
@@ -156,25 +186,34 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     maxOfflineStorageMb: config.maxOfflineStorageMb ?? 5,
     beforeSend: config.beforeSend,
     customTargetResolver: config.customTargetResolver,
-    traceExportIntervalMs: config.traceExportIntervalMs ?? 5000,
-    traceMaxQueueSize: config.traceMaxQueueSize ?? 2048,
-    traceMaxExportBatchSize: config.traceMaxExportBatchSize ?? 512,
-    metricExportIntervalMs: config.metricExportIntervalMs ?? 30000,
-    logExportScheduledDelayMs: config.logExportScheduledDelayMs ?? 5000,
-    logMaxQueueSize: config.logMaxQueueSize ?? 2048,
-    logMaxExportBatchSize: config.logMaxExportBatchSize ?? 512,
+    exportIntervalSeconds,
+    // Resolved to the *effective* metric cadence — inherited from
+    // exportIntervalSeconds unless explicitly overridden.
+    metricExportIntervalSeconds: metricIntervalMs / 1000,
+    maxExportBatchSize,
+    maxQueueSize,
+    vitalsCollectionIntervalSeconds,
+    traceExportIntervalMs: config.traceExportIntervalMs ?? exportIntervalMs,
+    traceMaxQueueSize: config.traceMaxQueueSize ?? maxQueueSize,
+    traceMaxExportBatchSize: config.traceMaxExportBatchSize ?? maxExportBatchSize,
+    metricExportIntervalMs: config.metricExportIntervalMs ?? metricIntervalMs,
+    logExportScheduledDelayMs: config.logExportScheduledDelayMs ?? exportIntervalMs,
+    logMaxQueueSize: config.logMaxQueueSize ?? maxQueueSize,
+    logMaxExportBatchSize: config.logMaxExportBatchSize ?? maxExportBatchSize,
     exportTimeoutMs: config.exportTimeoutMs ?? 30000,
+    // At-most-once by default: retrying an ambiguous failure (a timeout the
+    // collector may already have ingested) re-delivers identical span IDs.
     exportRetry: {
-      maxRetries: Math.max(0, config.exportRetry?.maxRetries ?? 3),
+      maxRetries: Math.max(0, config.exportRetry?.maxRetries ?? 0),
       initialDelayMs: Math.max(100, config.exportRetry?.initialDelayMs ?? 1000),
       maxDelayMs: Math.max(1000, config.exportRetry?.maxDelayMs ?? 30000),
     },
     offlineBuffer: {
-      enabled: config.offlineBuffer?.enabled ?? true,
+      enabled: config.offlineBuffer?.enabled ?? false,
       maxItems: {
-        traces: Math.max(0, config.offlineBuffer?.maxItems?.traces ?? 5000),
-        metrics: Math.max(0, config.offlineBuffer?.maxItems?.metrics ?? 2000),
-        logs: Math.max(0, config.offlineBuffer?.maxItems?.logs ?? 5000),
+        traces: Math.max(0, config.offlineBuffer?.maxItems?.traces ?? 0),
+        metrics: Math.max(0, config.offlineBuffer?.maxItems?.metrics ?? 0),
+        logs: Math.max(0, config.offlineBuffer?.maxItems?.logs ?? 0),
       },
     },
     debug: config.debug ?? false,
