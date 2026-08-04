@@ -13,7 +13,14 @@ export function wrapWithRetry<E extends RetryableExporter>(
   opts: ResolvedRetry,
   hooks: RetryHooks = {},
 ): E {
-  if (opts.maxRetries <= 0) return exporter;
+  // At zero retries the wrapper still has work to do when an offline hook or
+  // debug logging is wired up: it makes exactly one attempt and then hands
+  // retryable failures to `onFailedAfterRetries`, which is what feeds the
+  // offline buffer. Skipping the wrap here would silently disable buffering
+  // for integrators who re-enable it on top of the at-most-once default.
+  if (opts.maxRetries <= 0 && !hooks.onFailedAfterRetries && !hooks.debug) {
+    return exporter;
+  }
   const originalExport = exporter.export.bind(exporter);
   const label = hooks.label ?? 'export';
   (exporter as RetryableExporter).export = function (

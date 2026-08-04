@@ -9,9 +9,12 @@ interface ScoutCrashCpuApi {
   getCpuPercent?(): Promise<number>;
 }
 
-const SAMPLE_INTERVAL_MS = 10000;
+const DEFAULT_SAMPLE_INTERVAL_MS = 60000;
 
-export function installNativeCpuTracker(scout: Scout): () => void {
+export function installNativeCpuTracker(
+  scout: Scout,
+  sampleIntervalMs: number = DEFAULT_SAMPLE_INTERVAL_MS,
+): () => void {
   let ScoutCrash: ScoutCrashCpuApi | null = null;
   try {
     const ExpoModules = withSuppression(() => require('expo-modules-core'));
@@ -55,7 +58,7 @@ export function installNativeCpuTracker(scout: Scout): () => void {
     } catch {}
   };
   void tick();
-  const id = setInterval(tick, SAMPLE_INTERVAL_MS);
+  const id = setInterval(tick, sampleIntervalMs);
   return () => {
     stopped = true;
     clearInterval(id);

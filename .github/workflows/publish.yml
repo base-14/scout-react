@@ -20,9 +20,26 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test
+      - run: npm ci --no-fund --no-audit
+
+      # npm publishes whatever package.json says, not what the tag says, so an
+      # unsynced tag silently republishes the previous version under a new
+      # release. The scope.contract test (run by `make ci` below) pins
+      # SCOPE_VERSION to package.json, so this completes the chain:
+      # git tag -> package.json -> the version reported on every span.
+      - name: tag matches package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+      # Full pipeline, not just tests — a tag can be pushed from any commit,
+      # so publish cannot assume the CI workflow ever ran on it.
+      - run: make ci
+
       - run: npm publish --provenance --access public
 
       - run: gh release create "$GITHUB_REF_NAME" --generate-notes

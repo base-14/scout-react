@@ -1,4 +1,6 @@
 export const ATTR = {
+  /** Resource attribute: the scout-react version that produced the signal. */
+  SCOUT_REACT_VERSION: 'scout.react.version',
   SESSION_ID: 'session.id',
   SESSION_TYPE: 'session.type',
   SESSION_START_TIME: 'session.start_time',
@@ -111,6 +113,11 @@ export const ATTR = {
   CRASH_LAST_SCREEN: 'crash.last_screen',
   CRASH_TYPE: 'crash.type',
   CRASH_REASON: 'crash.reason',
+  /** Which detection path produced the record: exit_info, ndk_signal, ... */
+  CRASH_SOURCE: 'crash.source',
+  CRASH_DRAIN_APP_STATE: 'crash.drain_app_state',
+  CRASH_DRAIN_PROCESS_START_TIME: 'crash.drain_process_start_time',
+  CRASH_DRAIN_UPTIME_SECS: 'crash.drain_uptime_secs',
   LONG_TASK_ID: 'long_task.id',
   LONG_TASK_DURATION: 'long_task.duration',
   LONG_TASK_THRESHOLD: 'long_task.threshold',

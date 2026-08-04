@@ -449,12 +449,15 @@ private object ScoutExitInfoCollector {
     var newest = lastTs
     for (info in infos) {
       if (info.timestamp <= lastTs) continue
+      // The watermark advances over every record, benign ones included, so a
+      // dropped exit is never re-examined on the next launch.
       if (info.timestamp > newest) newest = info.timestamp
-      if (!isInteresting(info.reason)) continue
+      val crashType = ScoutExitInfoClassifier.crashTypeFor(reasonName(info.reason))
+        ?: continue
       try {
-        writeReport(dir, info)
+        writeReport(dir, info, crashType)
       } catch (_: Throwable) {
-        
+
       }
     }
     if (newest > lastTs) {
@@ -462,20 +465,10 @@ private object ScoutExitInfoCollector {
     }
   }
 
-  private fun isInteresting(reason: Int): Boolean = when (reason) {
-    ApplicationExitInfo.REASON_CRASH,
-    ApplicationExitInfo.REASON_CRASH_NATIVE,
-    ApplicationExitInfo.REASON_ANR,
-    ApplicationExitInfo.REASON_LOW_MEMORY,
-    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
-    ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
-    ApplicationExitInfo.REASON_SIGNALED -> true
-    else -> false
-  }
-
-  private fun writeReport(dir: File, info: ApplicationExitInfo) {
+  private fun writeReport(dir: File, info: ApplicationExitInfo, crashType: String) {
     val obj = JSONObject().apply {
-      put("crash.type", "exit_info")
+      put("crash.type", crashType)
+      put("crash.source", ScoutExitInfoClassifier.SOURCE)
       put("crash.os_reason_code", info.reason)
       put("crash.os_reason_name", reasonName(info.reason))
       
@@ -509,7 +502,9 @@ private object ScoutExitInfoCollector {
         val cap = ScoutExitInfoCollector.maxTombstoneBytes
         put("crash.tombstone", if (cap > 0 && trace.length > cap) trace.substring(0, cap) else trace)
       }
-      put("crash.timestamp", info.timestamp.toString())
+      // ISO-8601 for parity with every other crash path (the numeric form
+      // stays available as crash.death_timestamp_ms).
+      put("crash.timestamp", ScoutTimeFormat.isoUtc(info.timestamp))
     }
     val out = File(dir, "exit_${info.pid}_${info.timestamp}.json")
     out.writeText(obj.toString())

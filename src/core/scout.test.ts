@@ -309,3 +309,52 @@ describe('Scout.logEvent', () => {
     expect(span?.attributes.amount).toBe('49.99');
   });
 });
+describe('sampling gates fail closed before the session is hydrated', () => {
+  // An emit that reaches a gate before bootstrap() has resolved has no
+  // sampling decision to consult. It must be dropped, not let through:
+  // a gate that defaults open leaks startup telemetry past sampling for
+  // every session, sampled or not.
+  let recorder: Recorder;
+  beforeEach(() => {
+    recorder = makeRecorder();
+  });
+  function unbootstrapped(overrides: Record<string, unknown> = {}) {
+    return new Scout(
+      {
+        serviceName: 'test-svc',
+        endpoint: 'http://localhost:4318',
+        secure: false,
+        sessionSampleRate: 100,
+        ...overrides,
+      },
+      memoryPlatform(),
+    );
+  }
+  it('drops ordinary spans emitted before hydration', () => {
+    const s = unbootstrapped();
+    s.emitSpan(SPAN.LONG_TASK, { [ATTR.LONG_TASK_DURATION]: 1 });
+    s.logEvent('too_early');
+    expect(recorder.spans()).toHaveLength(0);
+  });
+  it('drops logs emitted before hydration', () => {
+    const s = unbootstrapped();
+    s.logInfo('too early');
+    expect(recorder.logs()).toHaveLength(0);
+  });
+  it('returns null from startRootSpan before hydration', () => {
+    const s = unbootstrapped();
+    expect(s.startRootSpan(SPAN.VIEW_SESSION)).toBeNull();
+  });
+  it('still lets error-class spans through via alwaysCaptureErrors', () => {
+    const s = unbootstrapped();
+    s.emitSpan(SPAN.ERROR, {});
+    const span = recorder.spans()[0];
+    expect(span?.name).toBe(SPAN.ERROR);
+    expect(span?.attributes[ATTR.SESSION_SAMPLED]).toBe('false');
+  });
+  it('drops error-class spans too when alwaysCaptureErrors is off', () => {
+    const s = unbootstrapped({ alwaysCaptureErrors: false });
+    s.emitSpan(SPAN.ERROR, {});
+    expect(recorder.spans()).toHaveLength(0);
+  });
+});

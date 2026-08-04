@@ -11,7 +11,6 @@ describe('resolveConfig', () => {
     expect(r.enableAutoTapTracking).toBe(true);
     expect(r.enableErrorTracking).toBe(true);
     expect(r.enableAnrDetection).toBe(true);
-    expect(r.enableFrameMetrics).toBe(true);
     expect(r.enableBatteryTracking).toBe(true);
     expect(r.enableNetworkTracking).toBe(true);
     expect(r.enableLogging).toBe(true);
@@ -20,6 +19,96 @@ describe('resolveConfig', () => {
     expect(r.sessionTimeoutMinutes).toBe(30);
     expect(r.maxSessionDurationMinutes).toBe(60);
     expect(r.alwaysCaptureErrors).toBe(true);
+  });
+  it('ships the minimal-telemetry, at-most-once default profile', () => {
+    // Locks the v0.1.12 default table (scout-flutter 0.1.23 parity). Changing
+    // any of these silently changes every integrator's telemetry volume or
+    // delivery semantics — it must be a deliberate, reviewed edit.
+    const r = resolveConfig({ serviceName: 'svc', endpoint: 'https://otlp' });
+    // Vitals metrics are opt-in: zero periodic metrics by default.
+    expect(r.enableFrameMetrics).toBe(false);
+    expect(r.enableMemoryMetrics).toBe(false);
+    expect(r.enableCpuMetrics).toBe(false);
+    // At-most-once: no retries, no offline buffer.
+    expect(r.exportRetry.maxRetries).toBe(0);
+    expect(r.offlineBuffer.enabled).toBe(false);
+    expect(r.offlineBuffer.maxItems).toEqual({ traces: 0, metrics: 0, logs: 0 });
+    // One 30s cadence for all three signals.
+    expect(r.exportIntervalSeconds).toBe(30);
+    expect(r.traceExportIntervalMs).toBe(30000);
+    expect(r.logExportScheduledDelayMs).toBe(30000);
+    expect(r.metricExportIntervalMs).toBe(30000);
+    expect(r.traceMaxQueueSize).toBe(2048);
+    expect(r.logMaxQueueSize).toBe(2048);
+    expect(r.traceMaxExportBatchSize).toBe(512);
+    expect(r.logMaxExportBatchSize).toBe(512);
+    expect(r.vitalsCollectionIntervalSeconds).toBe(60);
+  });
+  it('applies exportIntervalSeconds to all three signals', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      exportIntervalSeconds: 10,
+    });
+    expect(r.traceExportIntervalMs).toBe(10000);
+    expect(r.logExportScheduledDelayMs).toBe(10000);
+    expect(r.metricExportIntervalMs).toBe(10000);
+  });
+  it('lets an explicit per-signal *Ms option win over the unified knob', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      exportIntervalSeconds: 10,
+      traceExportIntervalMs: 5000,
+    });
+    expect(r.traceExportIntervalMs).toBe(5000);
+    expect(r.logExportScheduledDelayMs).toBe(10000);
+    expect(r.metricExportIntervalMs).toBe(10000);
+  });
+  it('lets metricExportIntervalSeconds override metrics only', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      exportIntervalSeconds: 10,
+      metricExportIntervalSeconds: 60,
+    });
+    expect(r.metricExportIntervalMs).toBe(60000);
+    expect(r.metricExportIntervalSeconds).toBe(60);
+    expect(r.traceExportIntervalMs).toBe(10000);
+  });
+  it('applies unified maxQueueSize / maxExportBatchSize to traces and logs', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      maxQueueSize: 100,
+      maxExportBatchSize: 50,
+    });
+    expect(r.traceMaxQueueSize).toBe(100);
+    expect(r.logMaxQueueSize).toBe(100);
+    expect(r.traceMaxExportBatchSize).toBe(50);
+    expect(r.logMaxExportBatchSize).toBe(50);
+  });
+  it('clamps interval knobs to a 1s / 1s floor', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      exportIntervalSeconds: 0,
+      vitalsCollectionIntervalSeconds: 0,
+    });
+    expect(r.exportIntervalSeconds).toBe(1);
+    expect(r.traceExportIntervalMs).toBe(1000);
+    expect(r.vitalsCollectionIntervalSeconds).toBe(1);
+  });
+  it('still honours opt-in retries and offline buffering', () => {
+    const r = resolveConfig({
+      serviceName: 's',
+      endpoint: 'e',
+      exportRetry: { maxRetries: 2 },
+      offlineBuffer: { enabled: true, maxItems: { traces: 100 } },
+    });
+    expect(r.exportRetry.maxRetries).toBe(2);
+    expect(r.offlineBuffer.enabled).toBe(true);
+    expect(r.offlineBuffer.maxItems.traces).toBe(100);
   });
   it('clamps iosHangThresholdMs (0 disables, otherwise 50ms floor, default 250)', () => {
     expect(resolveConfig({ serviceName: 's', endpoint: 'e' }).iosHangThresholdMs).toBe(

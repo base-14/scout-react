@@ -36,27 +36,45 @@ await Scout.initialize({
 
 How telemetry is batched and flushed.
 
-### Traces
+### Unified knobs (preferred)
+
+Set the cadence once for all three signals.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `traceExportIntervalMs` | `number` | `5000` | Trace buffer flush interval. Shorter = lower visibility delay; higher = fewer HTTP requests. |
-| `traceMaxQueueSize` | `number` | `2048` | Maximum spans buffered. When the queue is full (collector offline, slow export), the oldest spans are dropped. |
-| `traceMaxExportBatchSize` | `number` | `512` | Maximum spans per single HTTP POST. Larger batches = better compression, slightly higher tail latency. |
+| `exportIntervalSeconds` | `number` | `30` | Flush interval for traces, logs **and** metrics. Minimum `1`. |
+| `metricExportIntervalSeconds` | `number` | inherits | Metrics-only override. |
+| `maxExportBatchSize` | `number` | `512` | Max items per HTTP POST, applied to traces and logs. |
+| `maxQueueSize` | `number` | `2048` | Max items buffered before the oldest are dropped, applied to traces and logs. |
 
-### Logs
+### Per-signal overrides
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `logExportScheduledDelayMs` | `number` | `5000` | Log buffer flush interval. |
-| `logMaxQueueSize` | `number` | `2048` | Max log records buffered before drop. |
-| `logMaxExportBatchSize` | `number` | `512` | Max log records per POST. |
-
-### Metrics
+These still exist for backwards compatibility and **win over the unified knobs** when set explicitly. Left unset, they inherit from the table above.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `metricExportIntervalMs` | `number` | `30000` | Metric reader's periodic export interval. |
+| `traceExportIntervalMs` | `number` | `exportIntervalSeconds` | Trace buffer flush interval. |
+| `traceMaxQueueSize` | `number` | `maxQueueSize` | Maximum spans buffered. When the queue is full (collector offline, slow export), the oldest spans are dropped. |
+| `traceMaxExportBatchSize` | `number` | `maxExportBatchSize` | Maximum spans per single HTTP POST. Larger batches = better compression, slightly higher tail latency. |
+| `logExportScheduledDelayMs` | `number` | `exportIntervalSeconds` | Log buffer flush interval. |
+| `logMaxQueueSize` | `number` | `maxQueueSize` | Max log records buffered before drop. |
+| `logMaxExportBatchSize` | `number` | `maxExportBatchSize` | Max log records per POST. |
+| `metricExportIntervalMs` | `number` | `metricExportIntervalSeconds` | Metric reader's periodic export interval. |
+
+```ts
+// traces every 5s, logs and metrics every 10s
+Scout.initialize({
+  serviceName, endpoint,
+  exportIntervalSeconds: 10,
+  traceExportIntervalMs: 5000,
+});
+```
+
+### Vitals sampling
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `vitalsCollectionIntervalSeconds` | `number` | `60` | Sampling cadence for memory, CPU, frame and battery vitals. Minimum `1`. Only in effect for the vitals you have enabled — all of them are opt-in. |
 
 ### Shared HTTP
 
@@ -66,11 +84,13 @@ How telemetry is batched and flushed.
 
 ## Retry policy
 
-What happens when an export fails. The SDK wraps every OTLP exporter with retry-on-failure using exponential backoff with **full jitter** (a uniform random delay between 0 and the computed backoff). This avoids retry storms when many clients all reconnect after an outage.
+**Delivery is at-most-once by default.** Retrying an ambiguous failure — a timeout whose request the collector may already have ingested — re-delivers spans with identical span IDs. For RUM data, no duplicates is worth more than lossless delivery, so `maxRetries` defaults to `0` and one `export()` puts exactly one request on the wire.
+
+Opting in (`maxRetries > 0`) wraps every OTLP exporter with retry-on-failure using exponential backoff with **full jitter** (a uniform random delay between 0 and the computed backoff). This avoids retry storms when many clients all reconnect after an outage. Retry lives in exactly one layer: the SDK's own exporters issue a single request per attempt, so the total request count per batch is exactly `maxRetries + 1`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `exportRetry.maxRetries` | `number` | `3` | Retries per batch. Set `0` to disable retry (at-most-once delivery). |
+| `exportRetry.maxRetries` | `number` | `0` | Retries per batch. `0` = at-most-once delivery. Set `3` for the pre-0.1.12 behaviour. |
 | `exportRetry.initialDelayMs` | `number` | `1000` | First retry delay. Doubles every attempt up to `maxDelayMs`. |
 | `exportRetry.maxDelayMs` | `number` | `30000` | Cap on the exponential backoff. |
 
@@ -78,14 +98,23 @@ What happens when an export fails. The SDK wraps every OTLP exporter with retry-
 
 ## Offline buffer
 
-When in-memory retry is exhausted on a retryable failure, the batch is **persisted to disk** instead of being dropped. Buffered batches are replayed on next `Scout.initialize()`, on app foreground (RN), and on `visibilitychange → visible` / `online` events (web).
+**Off by default** since 0.1.12 — replaying a persisted batch is another way to deliver the same span twice. When enabled, a batch that fails with a retryable error (after any configured retries) is **persisted to disk** instead of being dropped, and replayed on next `Scout.initialize()`, on app foreground (RN), and on `visibilitychange → visible` / `online` events (web).
+
+Buffering works independently of `exportRetry.maxRetries`: with the default `0`, a failed batch goes straight to disk.
+
+```ts
+Scout.initialize({
+  serviceName, endpoint,
+  offlineBuffer: { enabled: true, maxItems: { traces: 5000, metrics: 2000, logs: 5000 } },
+});
+```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `offlineBuffer.enabled` | `boolean` | `true` | Master toggle. Set `false` for strict at-most-once delivery. |
-| `offlineBuffer.maxItems.traces` | `number` | `5000` | FIFO cap on persisted span items. Oldest evicted first when exceeded. |
-| `offlineBuffer.maxItems.metrics` | `number` | `2000` | Same, for metric data points. |
-| `offlineBuffer.maxItems.logs` | `number` | `5000` | Same, for log records. |
+| `offlineBuffer.enabled` | `boolean` | `false` | Master toggle. `false` keeps delivery strictly at-most-once. |
+| `offlineBuffer.maxItems.traces` | `number` | `0` | FIFO cap on persisted span items. Oldest evicted first when exceeded. |
+| `offlineBuffer.maxItems.metrics` | `number` | `0` | Same, for metric data points. |
+| `offlineBuffer.maxItems.logs` | `number` | `0` | Same, for log records. |
 | `maxOfflineStorageMb` | `number` | `5` | Coarse total-disk cap for the offline buffer. Runs alongside the per-signal `offlineBuffer.maxItems.*` caps above — whichever limit is reached first wins. |
 
 **Storage backend**: AsyncStorage on RN, localStorage on web. One key per signal type. Atomic per-batch eviction — if the FIFO cap would be exceeded by a new batch, the oldest batches are shifted out until the cap is satisfied.
@@ -100,7 +129,7 @@ Measured from a real Scout RN session: an OTLP-serialized span averages **~5 KB*
 
 | Profile | `traces` | `metrics` | `logs` | Worst-case disk |
 |---|---|---|---|---|
-| **Default** | `5000` | `2000` | `5000` | ~25–35 MB |
+| **Pre-0.1.12 default** | `5000` | `2000` | `5000` | ~25–35 MB |
 | Low-end Android, conservative | `2000` | `1000` | `2000` | ~10–15 MB |
 | High-traffic app, long-outage tolerant | `10000` | `5000` | `10000` | ~50–70 MB |
 | Web (localStorage 5–10 MB quota) | `3000` | `1500` | `3000` | ~15–20 MB |
@@ -117,7 +146,7 @@ If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Andr
 
 ## Auto-instrumentation toggles
 
-Every auto-instrumentation can be turned off independently. All default to `true`.
+Every auto-instrumentation can be turned off independently. All default to `true` except the periodic vitals metrics (`enableFrameMetrics`, `enableMemoryMetrics`, `enableCpuMetrics`) and console capture, which are opt-in.
 
 | Field | Default | What it captures |
 |---|---|---|
@@ -129,8 +158,9 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | `enablePerformanceMetrics` | `true` | Memory and CPU samples. |
 | `enableLongTaskDetection` | `true` | JS long tasks > `longTaskThresholdMs`. Emits `long_task` span. |
 | `enableAnrDetection` | `true` | RN App-Not-Responding via timer drift. Emits `anr` span. |
-| `enableFrameMetrics` | `true` | RN frame rate, slow frames, frozen frames. Emits `react_native.frame.*` metrics + `frozen_frame` spans. |
-| `enableMemoryMetrics` | `true` | RN process memory sampling. |
+| `enableFrameMetrics` | **`false`** | RN frame rate, slow frames, frozen frames. Emits `react_native.frame.*` metrics + `frozen_frame` spans. Opt-in: highest-volume signal the SDK produces. |
+| `enableMemoryMetrics` | **`false`** | RN/web process memory sampling. Emits `*.memory.*` metrics. Opt-in. |
+| `enableCpuMetrics` | **`false`** | RN CPU usage sampling. Emits `react_native.cpu.usage`. Opt-in. |
 | `enableWebVitals` | `true` | Web: LCP, INP, CLS, FCP, TTFB. Emits `web_vital` spans. |
 | `enableBatteryTracking` | `true` | RN: battery level + charging state on every span. |
 | `enableNetworkTracking` | `true` | Wraps `fetch` / `XMLHttpRequest`. Emits `http.request` spans + provider classification + GraphQL parse. |
@@ -149,6 +179,8 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `resourceAttributes` | `Record<string, string \| number \| boolean>` | `{}` | Extra resource attributes merged into every signal. Use for `deployment.region`, `team`, etc. |
+
+The SDK always stamps **`scout.react.version`** on every span, metric and log, on both web and native. It is pinned to the package version by a CI contract test, and cannot be overridden through `resourceAttributes` — the backend uses it to attribute telemetry to an SDK build, so an app-supplied value would misreport it.
 
 ## Filtering
 

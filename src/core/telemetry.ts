@@ -18,6 +18,12 @@ export function emitScoutConfigLog(scout: Scout): void {
     'anrThresholdMs',
     'metricExportIntervalMs',
     'logExportScheduledDelayMs',
+    'exportIntervalSeconds',
+    'metricExportIntervalSeconds',
+    'traceExportIntervalMs',
+    'vitalsCollectionIntervalSeconds',
+    'maxExportBatchSize',
+    'maxQueueSize',
     'enableErrorTracking',
     'enableLifecycleTracking',
     'enableStartupTracking',
@@ -26,6 +32,7 @@ export function emitScoutConfigLog(scout: Scout): void {
     'enableAnrDetection',
     'enableFrameMetrics',
     'enableMemoryMetrics',
+    'enableCpuMetrics',
     'enableWebVitals',
     'enableBatteryTracking',
     'enableNetworkTracking',
@@ -40,6 +47,11 @@ export function emitScoutConfigLog(scout: Scout): void {
   for (const k of passthrough) {
     if (cfg[k] != null) attrs[`scout.config.${snake(k)}`] = cfg[k] as never;
   }
+  // Delivery semantics — the two knobs that decide at-most-once vs at-least-once.
+  const retry = cfg['exportRetry'] as { maxRetries?: number } | undefined;
+  const offline = cfg['offlineBuffer'] as { enabled?: boolean } | undefined;
+  attrs['scout.config.export_max_retries'] = retry?.maxRetries ?? 0;
+  attrs['scout.config.offline_buffer_enabled'] = !!offline?.enabled;
   attrs['scout.config.use_before_send'] = !!cfg['beforeSend'];
   attrs['scout.config.use_first_party_hosts'] =
     Array.isArray(cfg['firstPartyHosts']) &&

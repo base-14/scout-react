@@ -1,9 +1,11 @@
 import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { LoggerProvider, BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
-import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import {
+  createOtlpTraceExporter,
+  createOtlpMetricExporter,
+  createOtlpLogExporter,
+} from '../core/otlp-exporter';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { trace, metrics } from '@opentelemetry/api';
 import { logs } from '@opentelemetry/api-logs';
@@ -17,6 +19,7 @@ import { wrapWithRetry } from '../core/retry-exporter';
 import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
+import { SCOPE_VERSION } from '../core/scope';
 import { WebPlatform } from './platform';
 import { installTapTracker } from './instrumentations/tap';
 import { installErrorTracker } from './instrumentations/error';
@@ -71,16 +74,19 @@ export const Scout = {
       ...(resolved.buildId ? { [ATTR.APP_BUILD_ID]: resolved.buildId } : {}),
       ...baseAttrs,
       ...((resolved.resourceAttributes as Record<string, any>) ?? {}),
+      // Last: the SDK's own version must not be shadowable by integrator
+      // resource attributes — the backend uses it to attribute every signal.
+      [ATTR.SCOUT_REACT_VERSION]: SCOPE_VERSION,
     });
     const headers = resolved.headers ?? {};
     const traceExporter = wrapWithRetry(
-      new OTLPTraceExporter({
+      createOtlpTraceExporter({
         url: `${endpoint}/v1/traces`,
         headers,
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.traces,
+      { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
     const traceProvider = new WebTracerProvider({
       resource,
@@ -96,13 +102,13 @@ export const Scout = {
     traceProvider.register();
     trace.setGlobalTracerProvider(traceProvider);
     const metricExporter = wrapWithRetry(
-      new OTLPMetricExporter({
+      createOtlpMetricExporter({
         url: `${endpoint}/v1/metrics`,
         headers,
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.metrics,
+      { ...offline.hooks.metrics, debug: !!resolved.debug, label: 'metrics' },
     );
     const meterProvider = new MeterProvider({
       resource,
@@ -119,13 +125,13 @@ export const Scout = {
     });
     metrics.setGlobalMeterProvider(meterProvider);
     const logExporter = wrapWithRetry(
-      new OTLPLogExporter({
+      createOtlpLogExporter({
         url: `${endpoint}/v1/logs`,
         headers,
         timeoutMillis: resolved.exportTimeoutMs,
       }),
       resolved.exportRetry,
-      offline.hooks.logs,
+      { ...offline.hooks.logs, debug: !!resolved.debug, label: 'logs' },
     );
     const loggerProvider = new LoggerProvider({
       resource,
@@ -179,7 +185,10 @@ export const Scout = {
     if (resolved.enableLongTaskDetection) {
       _disposers.push(installLongTaskTracker(core, resolved.longTaskThresholdMs));
     }
-    if (resolved.enableMemoryMetrics) _disposers.push(installMemoryTracker(core));
+    if (resolved.enableMemoryMetrics)
+      _disposers.push(
+        installMemoryTracker(core, resolved.vitalsCollectionIntervalSeconds * 1000),
+      );
     if (resolved.enableFrameMetrics) _disposers.push(installFrameMetricsTracker(core));
     if (resolved.enableWebVitals) _disposers.push(installWebVitalsTracker(core));
     if (resolved.enableBatteryTracking) _disposers.push(installBatteryTracker(core));

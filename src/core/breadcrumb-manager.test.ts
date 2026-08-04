@@ -56,13 +56,57 @@ describe('BreadcrumbManager', () => {
     expect(parsed[0].type).toBe('tap');
     expect(parsed[1].type).toBe('navigation');
   });
-  it('rehydrates persisted crumbs', async () => {
+  it('hydrates the previous session’s crumbs as orphans, not into the live trail', async () => {
+    // Breadcrumbs describe one session. A crash drained after restart needs
+    // the crumbs of the session that died; the new session's trail must start
+    // empty rather than inheriting a dead session's history.
     mgr.add('tap', 'persisted');
     await new Promise((r) => setTimeout(r, 5));
     const next = new BreadcrumbManager(platform);
     await next.hydrate();
-    expect(next.list()).toHaveLength(1);
-    expect(next.list()[0]?.message).toBe('persisted');
+    expect(next.list()).toEqual([]);
+    const orphaned = next.orphaned();
+    expect(orphaned).toHaveLength(1);
+    expect(orphaned[0]?.message).toBe('persisted');
+    expect(JSON.parse(next.serializeOrphaned()!)).toHaveLength(1);
+  });
+  it('serves the same orphans to every report describing that session', async () => {
+    // Both the app_crash span and any drained native crash report belong to
+    // the session that died, so reading the orphans must not consume them.
+    mgr.add('tap', 'persisted');
+    await new Promise((r) => setTimeout(r, 5));
+    const next = new BreadcrumbManager(platform);
+    await next.hydrate();
+    expect(next.orphaned()).toHaveLength(1);
+    expect(next.orphaned()).toHaveLength(1);
+  });
+  it('reports no orphans when nothing was persisted', async () => {
+    const fresh = new BreadcrumbManager(memoryPlatform());
+    await fresh.hydrate();
+    expect(fresh.orphaned()).toEqual([]);
+    expect(fresh.serializeOrphaned()).toBeNull();
+  });
+  it('keeps the live trail separate from the orphans', async () => {
+    mgr.add('tap', 'old');
+    await new Promise((r) => setTimeout(r, 5));
+    const next = new BreadcrumbManager(platform);
+    await next.hydrate();
+    next.add('tap', 'new');
+    expect(next.list().map((c) => c.message)).toEqual(['new']);
+    expect(next.orphaned().map((c) => c.message)).toEqual(['old']);
+  });
+  it('does not re-orphan the same crumbs on a launch that adds none', async () => {
+    // hydrate() overwrites the persisted copy immediately, so a launch that
+    // never records a crumb cannot resurrect the previous session's trail and
+    // attach it to a second crash report.
+    mgr.add('tap', 'persisted');
+    await new Promise((r) => setTimeout(r, 5));
+    const second = new BreadcrumbManager(platform);
+    await second.hydrate();
+    expect(second.orphaned()).toHaveLength(1);
+    const third = new BreadcrumbManager(platform);
+    await third.hydrate();
+    expect(third.orphaned()).toEqual([]);
   });
   it('clear() empties the buffer', () => {
     mgr.add('tap', 'one');
