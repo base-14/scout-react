@@ -1,15 +1,30 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+// Navigation timing describes the document, not this installation. A host that
+// mounts and unmounts the SDK (a Grafana app plugin, a micro-frontend) would
+// otherwise re-report the very same page load on every entry, with identical
+// timings, quietly skewing every startup percentile downstream.
+let coldStartEmitted = false;
+
+/** Test-only: clears the per-document cold-start latch. */
+export function __resetStartupStateForTests(): void {
+  coldStartEmitted = false;
+}
+
 export function installStartupTracker(scout: Scout): () => void {
   if (typeof performance === 'undefined') return () => {};
   const emitCold = () => {
+    if (coldStartEmitted) return;
     try {
       const entries = performance.getEntriesByType(
         'navigation',
       ) as PerformanceNavigationTiming[];
       const nav = entries[0];
+      // Latch only on a real emission: a document with no navigation entry
+      // yet must stay eligible rather than burn its one cold start on a no-op.
       if (!nav) return;
+      coldStartEmitted = true;
       const duration = (nav.loadEventEnd || nav.domContentLoadedEventEnd) / 1000;
       scout.emitSpan(SPAN.APP_STARTUP, {
         [ATTR.APP_STARTUP_TYPE]: 'cold',
