@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-08-05
+
+### Fixed
+
+- `Scout.shutdown()` now genuinely stops Web Vitals. `installWebVitalsTracker`
+  returned a no-op disposer, so the `web-vitals` observers — which have no
+  unsubscribe API — kept reporting after shutdown, and every re-`initialize()`
+  stacked another live callback. Registration is now once per document, routed
+  to whichever instance is currently installed.
+- `installStartupTracker` no longer re-emits a `cold` `app_startup` span when
+  the SDK is re-initialized on the same document. Navigation timing describes
+  the document, so the repeat carried byte-identical timings and skewed startup
+  percentiles.
+
+Both matter to hosts that mount and unmount the SDK rather than initializing
+once per page load — Grafana app plugins and micro-frontends, where scoping
+capture to the host's own lifetime is the only way to keep `service.name`
+meaning what it says.
+
 ## [0.1.13] - 2026-08-05
 
 Web interaction coverage and a distributed-tracing correctness fix. No default

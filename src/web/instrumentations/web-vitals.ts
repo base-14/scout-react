@@ -106,8 +106,26 @@ function extractLCP(m: Metric): Attributes {
   }
   return out;
 }
+// `web-vitals` registers PerformanceObservers that live as long as the document
+// — `onCLS(cb)` has no unsubscribe. So the callbacks are registered once and
+// permanently, and this holds whichever Scout should receive them. A host that
+// mounts the SDK repeatedly would otherwise stack one live closure per mount,
+// each reporting the same vital again against a provider that may already have
+// been shut down.
+let activeScout: Scout | null = null;
+let observersRegistered = false;
+
+/** Test-only: drops the registration latch and the active instance. */
+export function __resetWebVitalsStateForTests(): void {
+  activeScout = null;
+  observersRegistered = false;
+}
+
 export function installWebVitalsTracker(scout: Scout): () => void {
+  activeScout = scout;
   const send = (m: Metric) => {
+    const target = activeScout;
+    if (!target) return;
     try {
       const metricName = NAME_TO_METRIC[m.name] ?? `web.vital.${m.name.toLowerCase()}`;
       const base: Attributes = {
@@ -120,14 +138,14 @@ export function installWebVitalsTracker(scout: Scout): () => void {
       if (m.name === 'CLS') extras = extractCLS(m);
       else if (m.name === 'INP') extras = extractINP(m);
       else if (m.name === 'LCP') extras = extractLCP(m);
-      scout.emitHistogram(metricName, m.value, { ...base, ...extras });
-      scout.emitSpan(SPAN.WEB_VITAL, {
+      target.emitHistogram(metricName, m.value, { ...base, ...extras });
+      target.emitSpan(SPAN.WEB_VITAL, {
         ...base,
         ...extras,
-        ...scout.commonAttributes(),
+        ...target.commonAttributes(),
       });
       try {
-        const root = scout.rootSpan;
+        const root = target.rootSpan;
         if (root) {
           const prefix = `web.vital.${m.name.toLowerCase()}`;
           const screenAttrs: Record<string, any> = { [`${prefix}.value`]: m.value };
@@ -144,10 +162,17 @@ export function installWebVitalsTracker(scout: Scout): () => void {
       } catch {}
     } catch {}
   };
-  onCLS(send);
-  onFCP(send);
-  onINP(send);
-  onLCP(send);
-  onTTFB(send);
-  return () => {};
+  if (!observersRegistered) {
+    observersRegistered = true;
+    onCLS(send);
+    onFCP(send);
+    onINP(send);
+    onLCP(send);
+    onTTFB(send);
+  }
+  // Only detach if this instance is still the active one; a reinstall that
+  // already replaced it owns the slot now and must keep receiving vitals.
+  return () => {
+    if (activeScout === scout) activeScout = null;
+  };
 }
