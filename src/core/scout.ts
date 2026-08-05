@@ -21,6 +21,18 @@ import type { PlatformAdapter } from './platform';
 import type { Attributes, AttributeValue, SeverityText } from './types';
 import { SCOPE_NAME, SCOPE_VERSION } from './scope';
 import { uuidv4 } from './uuid';
+/**
+ * Handle for a span whose lifetime spans an in-flight operation. See
+ * {@link Scout.startTrackedSpan}.
+ */
+export interface TrackedSpan {
+  /** The live span. Prefer `end()` over calling `span.end()` directly. */
+  span: Span;
+  /** W3C `traceparent` value for this span, sampled-flag set. */
+  traceparent(): string;
+  /** Merges `extra` attributes, applies status, ends the span and records it. */
+  end(extra?: Attributes, opts?: { status?: SpanStatusCode }): void;
+}
 const MAX_STACK_LEN = 8000;
 function errorFingerprint(type: string, message: string, stack: string): string {
   const firstFrame =
@@ -550,6 +562,71 @@ export class Scout {
       } catch {}
     }
     return span;
+  }
+  /**
+   * Starts a span the caller ends later, with the same `beforeSend` filtering,
+   * sampling and view-counter bookkeeping `emitSpan` applies.
+   *
+   * `emitSpan` creates and ends a span in one call, so it cannot serve callers
+   * that need the span's ids *before* the work finishes. W3C trace context is
+   * the motivating case: `traceparent` must go out with the request, while the
+   * status and duration are only known once it comes back.
+   *
+   * Returns null when the span is sampled out or dropped by `beforeSend` — and
+   * that null is meaningful: callers must not inject a `traceparent` for a span
+   * that will never be exported, or the backend sees a dangling parent.
+   */
+  startTrackedSpan(name: string, attributes: Attributes = {}): TrackedSpan | null {
+    if (!this.session.isSampled) return null;
+    const filtered = applyBeforeSend(this._config.beforeSend, 'span', name, attributes);
+    if (!filtered) return null;
+    let span: Span;
+    try {
+      const parentCtx =
+        this._rootSpan && this._rootSpan !== this._rootSpanSentinel
+          ? trace.setSpan(context.active(), this._rootSpan)
+          : context.active();
+      span = this.tracer.startSpan(
+        name,
+        { attributes: toOtelAttrs(filtered.attributes) },
+        parentCtx,
+      );
+    } catch (e) {
+      this.debug('startTrackedSpan failed', e);
+      return null;
+    }
+    const recorded: Attributes = { ...filtered.attributes };
+    return {
+      span,
+      traceparent: () => {
+        const ctx = span.spanContext();
+        return `00-${ctx.traceId}-${ctx.spanId}-01`;
+      },
+      end: (extra, opts) => {
+        try {
+          if (extra) {
+            Object.assign(recorded, extra);
+            span.setAttributes(toOtelAttrs(extra));
+          }
+          if (opts?.status === SpanStatusCode.ERROR) {
+            span.setStatus({ code: SpanStatusCode.ERROR });
+          }
+          span.end();
+          this.debug('emit', name, recorded[ATTR.SCREEN_NAME] ?? '(no-screen)');
+          this.session.touch();
+          this.bumpViewCounter(name, recorded);
+          if (this._webViewBridgeSend) {
+            this._webViewBridgeSend({
+              type: name,
+              attributes: recorded,
+              timestamp_ms: Date.now(),
+            });
+          }
+        } catch (e) {
+          this.debug('startTrackedSpan end failed', e);
+        }
+      },
+    };
   }
   private bumpViewCounter(spanName: string, attributes: Attributes): void {
     const screen = attributes[ATTR.SCREEN_NAME] ?? this._runtimeAttrs[ATTR.SCREEN_NAME];

@@ -5,6 +5,18 @@ export interface CustomTargetInfo {
   searchForText?: boolean;
 }
 export type CustomTargetResolver = (node: unknown) => CustomTargetInfo | null;
+/**
+ * DOM events auto-tap tracking can emit `user_interaction` spans for. The value
+ * lands on the span as `user_interaction.type`, so it is also the vocabulary
+ * dashboards filter on.
+ */
+export type InteractionEvent = 'click' | 'change' | 'submit' | 'input';
+export const DEFAULT_INTERACTION_EVENTS: InteractionEvent[] = [
+  'click',
+  'change',
+  'submit',
+  'input',
+];
 export interface ScoutConfig {
   serviceName: string;
   endpoint: string;
@@ -16,6 +28,12 @@ export interface ScoutConfig {
   headers?: Record<string, string>;
   resourceAttributes?: Attributes;
   enableAutoTapTracking?: boolean;
+  /**
+   * Which DOM events auto-tap tracking listens to. Web only; ignored when
+   * `enableAutoTapTracking` is false. Narrow this on chatty UIs — `input` is
+   * the usual first thing to drop.
+   */
+  interactionEvents?: InteractionEvent[];
   enableErrorTracking?: boolean;
   enableLifecycleTracking?: boolean;
   enableStartupTracking?: boolean;
@@ -155,6 +173,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     headers: config.headers,
     resourceAttributes: config.resourceAttributes,
     enableAutoTapTracking: config.enableAutoTapTracking ?? true,
+    interactionEvents: config.interactionEvents ?? DEFAULT_INTERACTION_EVENTS,
     enableErrorTracking: config.enableErrorTracking ?? true,
     enableLifecycleTracking: config.enableLifecycleTracking ?? true,
     enableStartupTracking: config.enableStartupTracking ?? true,

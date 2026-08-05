@@ -51,7 +51,7 @@ export function installNetworkTracker(scout: Scout): () => void {
       const headers = new Headers(init?.headers ?? (input as Request).headers ?? {});
       const providerAttrs = providerAttrsFor(url);
       const graphqlAttrs = graphqlReqAttrsFor(init?.body);
-      const httpSpan = scout.startChildSpan(SPAN.HTTP_REQUEST, {
+      const tracked = scout.startTrackedSpan(SPAN.HTTP_REQUEST, {
         [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
         [ATTR.HTTP_METHOD]: method,
         [ATTR.HTTP_URL]: url,
@@ -59,9 +59,9 @@ export function installNetworkTracker(scout: Scout): () => void {
         ...graphqlAttrs,
         ...scout.commonAttributes(),
       });
-      if (httpSpan && isFirstParty(url)) {
-        const ctx = httpSpan.spanContext();
-        headers.set('traceparent', `00-${ctx.traceId}-${ctx.spanId}-01`);
+      const httpSpan = tracked?.span;
+      if (tracked && isFirstParty(url)) {
+        headers.set('traceparent', tracked.traceparent());
       }
       try {
         const response = await originalFetch(input as any, { ...init, headers });
@@ -102,7 +102,7 @@ export function installNetworkTracker(scout: Scout): () => void {
               });
             } catch {}
           }
-          httpSpan.end();
+          tracked?.end();
         }
         scout.addBreadcrumb(
           BREADCRUMB_TYPE.HTTP,
@@ -117,7 +117,7 @@ export function installNetworkTracker(scout: Scout): () => void {
             [ATTR.HTTP_ERROR]: error instanceof Error ? error.message : String(error),
           });
           httpSpan.setStatus({ code: SpanStatusCode.ERROR });
-          httpSpan.end();
+          tracked?.end();
         }
         scout.addBreadcrumb(BREADCRUMB_TYPE.HTTP, `${method} ${url} → error`);
         throw error;
@@ -146,12 +146,25 @@ export function installNetworkTracker(scout: Scout): () => void {
         return origSend.call(this, body as any);
       }
       const start = performance.now();
-      if (isFirstParty(meta.url)) {
+      // Started before send() so the span's own ids are what goes out on the
+      // wire — a header minted from fresh random ids would name a parent the
+      // backend never receives.
+      const tracked = scout.startTrackedSpan(SPAN.HTTP_REQUEST, {
+        [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
+        [ATTR.HTTP_METHOD]: meta.method,
+        [ATTR.HTTP_URL]: meta.url,
+        ...providerAttrsFor(meta.url),
+        ...scout.commonAttributes(),
+      });
+      if (tracked && isFirstParty(meta.url)) {
         try {
-          origSetHeader.call(this, 'traceparent', makeTraceparent());
+          origSetHeader.call(this, 'traceparent', tracked.traceparent());
         } catch {}
       }
+      let finalized = false;
       const finalize = (statusOverride?: number, errorMsg?: string) => {
+        if (finalized) return;
+        finalized = true;
         const duration = performance.now() - start;
         const status = statusOverride ?? this.status;
         const phaseAttrs = (() => {
@@ -162,17 +175,12 @@ export function installNetworkTracker(scout: Scout): () => void {
             return {};
           }
         })();
-        scout.emitSpan(
-          SPAN.HTTP_REQUEST,
+        tracked?.end(
           {
-            [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
-            [ATTR.HTTP_METHOD]: meta.method,
-            [ATTR.HTTP_URL]: meta.url,
             [ATTR.HTTP_STATUS_CODE]: status,
             [ATTR.HTTP_DURATION_MS]: duration,
             ...(errorMsg ? { [ATTR.HTTP_ERROR]: errorMsg } : {}),
             ...phaseAttrs,
-            ...scout.commonAttributes(),
           },
           { status: errorMsg || status >= 400 ? SpanStatusCode.ERROR : undefined },
         );
@@ -226,9 +234,6 @@ function normalizeHost(h: string): string {
 function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//, '');
 }
-function makeTraceparent(): string {
-  return `00-${randHex(32)}-${randHex(16)}-01`;
-}
 function providerAttrsFor(url: string): Attributes {
   const p = lookupProvider(url);
   if (!p) return {};
@@ -251,11 +256,4 @@ function graphqlReqAttrsFor(body: unknown): Attributes {
     } catch {}
   }
   return out;
-}
-function randHex(len: number): string {
-  const bytes = new Uint8Array(len / 2);
-  const g: any = globalThis;
-  if (g.crypto?.getRandomValues) g.crypto.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
