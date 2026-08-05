@@ -119,6 +119,7 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | Signal | Span / metric | Notes |
 |---|---|---|
 | Clicks / taps | `user_interaction` | `user_interaction.target`, `target.type` |
+| Value changes, submits, text edits | `user_interaction` | Web only. `user_interaction.type` is `click` \| `change` \| `submit` \| `input`; see `interactionEvents` |
 | Navigation | `screen_view`, `view_session` | screen_view becomes the root span — all spans on that screen share its trace id |
 | Screen load time | `screen_load` | `screen.load_time` in seconds |
 | App startup | `app_startup` | cold + warm |

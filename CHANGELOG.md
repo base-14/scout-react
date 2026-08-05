@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-08-05
+
+Web interaction coverage and a distributed-tracing correctness fix. No default
+turns anything off; `input` tracking is new and on by default — narrow it with
+`interactionEvents` if your UI is text-heavy.
+
+### Added
+
+- **Interaction coverage beyond `click`.** Auto-tap tracking now also emits
+  `user_interaction` spans for `change` (select / checkbox / radio / file /
+  date / time / range), `submit` (form submission *and* Enter in a text entry,
+  which React handlers routinely swallow), and `input` (debounced 500 ms after
+  typing stops, one span per settled edit). `user_interaction.type` carries
+  which one it was; existing `click` spans are unchanged.
+- `interactionEvents` config option — the subset of
+  `['click','change','submit','input']` to listen to. Defaults to all four;
+  `[]` disables interaction tracking without touching `enableAutoTapTracking`.
+- `user_interaction.trigger` attribute (`pointer` | `keyboard` | `unknown`),
+  which distinguishes Enter-to-search from clicking a search button.
+- `user_interaction.value` attribute, set only for controls with a closed value
+  space (selected option label, `checked`/`unchecked`). Free text is never
+  captured, and `password`/`email`/`tel`/`hidden` fields emit no `input` span at
+  all and report their description as `redacted` rather than falling through to
+  neighbouring text content.
+- `Scout.startTrackedSpan()` — starts a span the caller ends later, applying the
+  same `beforeSend`, sampling and view-counter bookkeeping as `emitSpan`. Needed
+  wherever a span's ids must be known before the work it measures completes.
+
+### Fixed
+
+- **`XMLHttpRequest` sent a fabricated `traceparent`.** The header was built
+  from fresh random ids rather than the emitted `http.request` span's, so XHR
+  calls never correlated with their own span or with the backend, and the
+  backend saw a parent span id it would never receive. Both `fetch` and XHR now
+  derive the header from the span they actually export.
+- A failed `XMLHttpRequest` emitted **two** `http.request` spans, because both
+  the `error` and `loadend` listeners ran the finalizer.
+- `fetch` spans were bypassing `beforeSend` and were not counted in
+  `view.resource.count`; only the XHR path was. Both now behave identically.
+- XHR `http.request` spans had a near-zero duration, since the span was created
+  after the request finished. They now span the request.
+
+### Changed
+
+- XHR `http.request` spans now carry `http.provider.*` classification, which
+  previously only `fetch` spans had.
+- Documented that `headers` is read per export, so an expiring bearer token can
+  be rotated by mutating the object passed to `initialize` — no re-init, no
+  dropped batches. Locked by tests in `otlp-exporter.test.ts` / `config.test.ts`.
+
 ## [0.1.12] - 2026-08-03
 
 Brings scout-react to parity with scout-flutter 0.1.23's production-hardening

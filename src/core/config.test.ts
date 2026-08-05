@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { resolveConfig, resolveEndpoint } from './config';
 describe('resolveConfig', () => {
+  // The other half of the in-place token-refresh contract locked in
+  // otlp-exporter.test.ts: the exporters can only observe a mutation if the
+  // header map survives config resolution by reference.
+  it('passes the headers object through by reference, not by copy', () => {
+    const headers = { authorization: 'Bearer old' };
+    const r = resolveConfig({ serviceName: 'svc', endpoint: 'https://o.test', headers });
+    expect(r.headers).toBe(headers);
+  });
   it('applies sensible defaults', () => {
     const r = resolveConfig({
       serviceName: 'svc',

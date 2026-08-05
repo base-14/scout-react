@@ -37,6 +37,13 @@ export const ATTR = {
   OPERATION_FAILURE_REASON: 'operation.failure_reason',
   USER_INTERACTION_ID: 'user_interaction.id',
   USER_INTERACTION_TYPE: 'user_interaction.type',
+  /** How the interaction was produced: `pointer` | `keyboard` | `unknown`. */
+  USER_INTERACTION_TRIGGER: 'user_interaction.trigger',
+  /**
+   * The committed value, but only for controls with a closed value space
+   * (checkbox state, selected option label). Never free text.
+   */
+  USER_INTERACTION_VALUE: 'user_interaction.value',
   USER_INTERACTION_TARGET: 'user_interaction.target',
   USER_INTERACTION_TARGET_TYPE: 'user_interaction.target.type',
   USER_INTERACTION_TARGET_NAME_SOURCE: 'user_interaction.target.name_source',

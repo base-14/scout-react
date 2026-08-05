@@ -148,6 +148,21 @@ describe('otlp-exporter — at-most-once delivery', () => {
     });
   });
 
+  // Integrators whose ingest auth is a short-lived bearer token refresh it by
+  // mutating the very object they passed to `Scout.initialize`. That only works
+  // because the header map is read per export rather than snapshotted at
+  // construction — a defensive copy anywhere along that path would strand every
+  // exporter on the token the page was loaded with.
+  it('reads the headers object per export, so in-place token refresh takes effect', async () => {
+    const headers: Record<string, string> = { authorization: 'Bearer old' };
+    const exporter = createOtlpTraceExporter({ ...OPTS, headers });
+    await exportOnce(exporter);
+    expect(fetchMock.mock.calls[0]![1].headers.authorization).toBe('Bearer old');
+    headers.authorization = 'Bearer refreshed';
+    await exportOnce(exporter);
+    expect(fetchMock.mock.calls[1]![1].headers.authorization).toBe('Bearer refreshed');
+  });
+
   it('keeps the stock exporter’s CUMULATIVE temporality', () => {
     const exporter = createOtlpMetricExporter({ url: 'https://c.test/v1/metrics' });
     for (const t of [

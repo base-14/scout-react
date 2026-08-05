@@ -29,8 +29,24 @@ await Scout.initialize({
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `headers` | `Record<string, string>` | `{}` | Extra HTTP headers on every export. Use for auth tokens, tenant IDs, etc. |
-| `firstPartyHosts` | `Array<string \| RegExp>` | `[]` | Hosts considered "your" backend. Outbound `fetch` calls to these hosts get a `traceparent` header so backend traces correlate. |
+| `firstPartyHosts` | `Array<string \| RegExp>` | `[]` | Hosts considered "your" backend. Outbound `fetch` and `XMLHttpRequest` calls to these hosts get a `traceparent` header so backend traces correlate. |
 | `ignoreUrlPatterns` | `RegExp[]` | `[]` | URLs matching any of these are not auto-instrumented (no `http.request` span, no breadcrumb). |
+
+### Rotating an auth token
+
+`headers` is read on every export rather than snapshotted at init, so an
+expiring bearer token is refreshed by mutating the object you passed in:
+
+```ts
+const headers = { Authorization: `Bearer ${token}` };
+await Scout.initialize({ serviceName: 'app', endpoint, headers });
+
+// later, before the token expires — no re-initialize, no dropped batches
+headers.Authorization = `Bearer ${await mintToken()}`;
+```
+
+Replacing the object (`headers = {...}`) does **not** work; the exporters hold
+the original reference.
 
 ## Export pacing
 
@@ -150,7 +166,8 @@ Every auto-instrumentation can be turned off independently. All default to `true
 
 | Field | Default | What it captures |
 |---|---|---|
-| `enableAutoTapTracking` | `true` | Web: `click` on every element. RN: `onPress` on Pressable/Touchable* (via babel plugin). Emits `user_interaction` spans. |
+| `enableAutoTapTracking` | `true` | Web: the DOM events listed under `interactionEvents`. RN: `onPress` on Pressable/Touchable* (via babel plugin). Emits `user_interaction` spans. |
+| `interactionEvents` | `['click','change','submit','input']` | Web only. Which DOM events auto-tap tracking listens to; the value lands on the span as `user_interaction.type`. See below. |
 | `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. |
 | `enableLifecycleTracking` | `true` | App `foreground`/`background`/`paused`/`resumed`. Emits `app_paused` / `app_resumed` spans + `view.in_foreground_periods_json` on screen_view. |
 | `enableStartupTracking` | `true` | Cold/warm/hot start timing. Emits `app_startup` span. |
@@ -166,6 +183,22 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | `enableNetworkTracking` | `true` | Wraps `fetch` / `XMLHttpRequest`. Emits `http.request` spans + provider classification + GraphQL parse. |
 | `enableLogging` | `true` | Allows `Scout.log*()` calls to emit OTLP logs. |
 | `captureConsole` / `capturePrintStatements` | `false` | Mirrors `console.log/info/warn/error/debug` to OTLP logs. Original `console` output preserved. |
+
+### `interactionEvents` (web)
+
+| Value | Fires on | Notes |
+|---|---|---|
+| `click` | any element | Carries `target.x` / `target.y` and `user_interaction.trigger: pointer`. |
+| `change` | `<select>`, checkbox, radio, file, date, time, range | Free-text inputs are excluded — their `change` fires on blur, which reports an edit somewhere the user does not associate with it. Adds `user_interaction.value` for closed value spaces only (selected option label, `checked`/`unchecked`). |
+| `submit` | form submission, **and** Enter in a text entry | `user_interaction.trigger` distinguishes `unknown` (form) from `keyboard` (Enter). The Enter case exists because React handlers routinely swallow the real `submit` event. |
+| `input` | text entries | Debounced 500 ms after typing stops, so one edit is one span. Moving to another field flushes the previous edit immediately, preserving edit order. Never fires for `password`/`email`/`tel`/`hidden`. |
+
+Narrow the list on chatty UIs — `input` is usually the first to drop. `[]`
+disables interaction tracking without touching `enableAutoTapTracking`.
+
+Free text never leaves the page: `user_interaction.value` is only set for
+controls with a closed value space, and a sensitive field's description is
+reported as `redacted` rather than falling through to nearby text content.
 
 ## Thresholds
 
