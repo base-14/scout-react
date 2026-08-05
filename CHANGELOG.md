@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the SDK is re-initialized on the same document. Navigation timing describes
   the document, so the repeat carried byte-identical timings and skewed startup
   percentiles.
+- `installRouteTracker` now restores the real `history.pushState` /
+  `history.replaceState` on dispose. It captured `history.pushState.bind(history)`
+  and restored that wrapper instead of the original, so every install/uninstall
+  cycle left another `bind` layer on `history` — an unbounded chain for a host
+  that mounts the SDK on every visit.
+
+### Added
+
+- `src/web/lifecycle.test.ts` covers `Scout.initialize` / `Scout.shutdown`,
+  which had no tests: that shutdown restores every patched page global, and that
+  install/uninstall cycles neither stack patches nor wedge re-initialization.
 
 Both matter to hosts that mount and unmount the SDK rather than initializing
 once per page load — Grafana app plugins and micro-frontends, where scoping

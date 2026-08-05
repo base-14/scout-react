@@ -64,15 +64,19 @@ export function installRouteTracker(scout: Scout): () => void {
       });
     });
   }
-  const origPush = history.pushState.bind(history);
-  const origReplace = history.replaceState.bind(history);
+  // Captured unbound, and called with `apply`, so the disposer can put the
+  // original function back. Restoring a `.bind()` wrapper instead would leave
+  // the page subtly altered and stack another layer on every reinstall — which
+  // hosts that mount and unmount the SDK do on every visit.
+  const origPush = history.pushState;
+  const origReplace = history.replaceState;
   history.pushState = function (...args: Parameters<typeof history.pushState>) {
-    const r = origPush(...args);
+    const r = origPush.apply(history, args);
     queueMicrotask(handleChange);
     return r;
   };
   history.replaceState = function (...args: Parameters<typeof history.replaceState>) {
-    const r = origReplace(...args);
+    const r = origReplace.apply(history, args);
     queueMicrotask(handleChange);
     return r;
   };
