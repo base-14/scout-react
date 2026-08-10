@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-08-10
+
+### Fixed
+
+- Web Vitals now emit their core attributes under the `web.vital.*` namespace.
+  `vital.name`, `vital.value`, `vital.rating`, `vital.id` and
+  `vital.target_selector` were missing the `web.` prefix that every sibling
+  attribute (`web.vital.cls.*`, `web.vital.inp.*`, `web.vital.lcp.*`), the
+  emitted metrics (`web.vital.lcp`, `web.vital.fcp`, …) and the root-span
+  rollups (`web.vital.<name>.value`) already used. Backends projecting
+  `web.vital.name`/`value`/`rating` read empty values, so `web_vital` events
+  rendered without a name or a measurement. The old keys also collided with
+  the mobile `app_vital` schema, which owns `vital.name` and `vital.type`.
+
+  **Breaking for consumers of the old keys:** the previous `vital.*` names are
+  no longer emitted. Telemetry already ingested keeps the old attribute names.
+
 ## [0.1.14] - 2026-08-05
 
 ### Fixed

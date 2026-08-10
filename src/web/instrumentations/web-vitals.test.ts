@@ -77,6 +77,27 @@ describe('installWebVitalsTracker', () => {
     expect(spans).toHaveLength(1);
   });
 
+  // Asserted as literal keys, not via ATTR.*, because these strings are the
+  // wire contract the backend projects on: renaming a constant must not be
+  // able to keep this green. `vital.name` in particular belongs to the mobile
+  // app_vital schema — web vitals must not land in that namespace.
+  it('names the core attributes under the web.vital namespace', async () => {
+    await install();
+    fire('LCP', 2400);
+
+    const [span] = recorder.spans().filter((s) => s.name === SPAN.WEB_VITAL);
+    expect(span.attributes).toMatchObject({
+      'web.vital.name': 'LCP',
+      'web.vital.value': 2400,
+      'web.vital.rating': 'good',
+      'web.vital.id': 'v1-LCP',
+    });
+    expect(Object.keys(span.attributes)).not.toContain('vital.name');
+    expect(Object.keys(span.attributes)).not.toContain('vital.value');
+    expect(Object.keys(span.attributes)).not.toContain('vital.rating');
+    expect(Object.keys(span.attributes)).not.toContain('vital.id');
+  });
+
   // The observers cannot be torn down, so reinstalling must reuse the existing
   // registration rather than stacking another one. Without this, a host that
   // mounts the SDK n times reports every subsequent vital n times over.
