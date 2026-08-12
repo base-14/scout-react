@@ -86,9 +86,7 @@ describe('setWebViewBridge — span forwarding', () => {
     const s = await makeScout();
     s.setWebViewBridge({ sessionId: 'native-session-42', send });
     s.logEvent('tap', {});
-    expect(send.mock.calls[0][0].attributes[ATTR.SESSION_ID]).toBe(
-      'native-session-42',
-    );
+    expect(send.mock.calls[0][0].attributes[ATTR.SESSION_ID]).toBe('native-session-42');
   });
 
   it('does not let a throwing send() break span emission', async () => {
