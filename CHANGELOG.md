@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-08-11
+
+### Added
+
+- `setWebViewBridge({ relay: true })` — a native host embedding this page (for
+  example a Flutter app using `scout_flutter`'s `ScoutWebViewBridge`) can now
+  take over span delivery. With `relay` set the page stops POSTing spans to the
+  collector and hands them to the host's `send` callback instead.
+
+  Previously `send` only ever *mirrored*: the page exported the span **and**
+  passed a copy to the host, so every bridged interaction reached the backend
+  twice — once under the web service name, once re-emitted natively. That
+  duplication is now opt-in (`send` without `relay`) rather than unavoidable.
+
+  Gating happens at the span exporter, not the emit path, so spans are still
+  created, sampled and parented in relay mode and `firstPartyHosts`
+  `traceparent` injection keeps working. Logs and metrics continue to export
+  over HTTP in every mode, because the host-side re-emit accepts spans only.
+
+- `Scout.isExportingSpans` — reports whether the page still owns span delivery.
+  Useful for diagnosing a mis-wired bridge, which is otherwise silently lossy.
+
+- `WebViewBridgeOptions` is now an exported type, and `setWebViewBridge`
+  documents its three modes: session-adoption-only (recommended), relay, and
+  mirror.
+
+- Test coverage for the WebView bridge, which previously had none: session and
+  anonymous-id adoption, sampling behaviour, forwarding from both `emitSpan`
+  and `startTrackedSpan`, pre-`initialize()` injection, and relay gating.
+
 ## [0.1.15] - 2026-08-10
 
 ### Fixed

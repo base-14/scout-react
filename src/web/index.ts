@@ -1,4 +1,8 @@
-import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
+import {
+  WebTracerProvider,
+  BatchSpanProcessor,
+  type SpanExporter,
+} from '@opentelemetry/sdk-trace-web';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { LoggerProvider, BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import {
@@ -13,9 +17,10 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
-import { Scout as ScoutCore } from '../core/scout';
+import { Scout as ScoutCore, type WebViewBridgeOptions } from '../core/scout';
 import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config';
 import { wrapWithRetry } from '../core/retry-exporter';
+import { GatedSpanExporter } from '../core/gated-span-exporter';
 import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
@@ -54,8 +59,12 @@ export type {
   SeverityText,
 } from '../core/types';
 export type { ScoutConfig } from '../core/config';
+export type { WebViewBridgeOptions } from '../core/scout';
 let _instance: ScoutCore | null = null;
 const _disposers: Array<() => void> = [];
+// Closed while a native host relays this page's spans, so the same span is
+// not delivered twice. Assigned during initialize(); null before that.
+let _traceGate: GatedSpanExporter<SpanExporter> | null = null;
 export const Scout = {
   async initialize(config: ScoutConfig): Promise<void> {
     if (_instance) return;
@@ -88,10 +97,14 @@ export const Scout = {
       resolved.exportRetry,
       { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
+    // Wrapped outside the retry layer: a relayed span should be dropped
+    // outright, not retried or spilled into the offline buffer.
+    const gatedTraceExporter = new GatedSpanExporter(traceExporter);
+    _traceGate = gatedTraceExporter;
     const traceProvider = new WebTracerProvider({
       resource,
       spanProcessors: [
-        new BatchSpanProcessor(traceExporter, {
+        new BatchSpanProcessor(gatedTraceExporter, {
           scheduledDelayMillis: resolved.traceExportIntervalMs,
           maxQueueSize: resolved.traceMaxQueueSize,
           maxExportBatchSize: resolved.traceMaxExportBatchSize,
@@ -148,13 +161,16 @@ export const Scout = {
     const core = new ScoutCore(config, platform);
     await core.bootstrap();
     _instance = core;
+    // A host that injected its bridge before the page finished booting had
+    // its call parked; apply it now, gate included.
     const pending = (
       Scout as unknown as {
-        _pendingWebViewBridge?: Parameters<typeof core.setWebViewBridge>[0];
+        _pendingWebViewBridge?: WebViewBridgeOptions;
       }
     )._pendingWebViewBridge;
     if (pending) {
       core.setWebViewBridge(pending);
+      gatedTraceExporter.setOpen(!ScoutCore.isRelaying(pending));
       (
         Scout as unknown as {
           _pendingWebViewBridge?: unknown;
@@ -228,20 +244,37 @@ export const Scout = {
     if (_instance) emitScoutUsageOnce(_instance, 'logEvent');
     _instance?.logEvent(name, attributes);
   },
-  setWebViewBridge(bridge: {
-    sessionId?: string;
-    anonymousId?: string;
-    send?: (payload: Record<string, unknown>) => void;
-  }): void {
+  /**
+   * Adopt a native host's session so an embedded WebView and the app around
+   * it report as one session. Safe to call before `initialize()` — the call
+   * is parked and applied once the SDK is up, which is what lets a host
+   * inject its bridge the moment the page starts loading.
+   *
+   * See {@link WebViewBridgeOptions} for the three modes. In short: pass
+   * `sessionId` + `anonymousId` alone for unified sessions with no
+   * duplication, and add `send` + `relay: true` only when the WebView cannot
+   * reach the collector on its own.
+   */
+  setWebViewBridge(bridge: WebViewBridgeOptions): void {
     if (_instance) {
       _instance.setWebViewBridge(bridge);
+      _traceGate?.setOpen(!ScoutCore.isRelaying(bridge));
     } else {
       (
         Scout as unknown as {
-          _pendingWebViewBridge?: typeof bridge;
+          _pendingWebViewBridge?: WebViewBridgeOptions;
         }
       )._pendingWebViewBridge = bridge;
     }
+  },
+  /**
+   * Whether the page is still exporting spans over HTTP. False once a host
+   * has taken over delivery via `setWebViewBridge({ send, relay: true })`.
+   * Exposed for host-side diagnostics — the bridge is easy to mis-wire and
+   * silently lossy when it is.
+   */
+  get isExportingSpans(): boolean {
+    return _traceGate?.isOpen ?? true;
   },
   addBreadcrumb(type: string, message: string): void {
     _instance?.addBreadcrumb(type, message);
@@ -333,6 +366,7 @@ export const Scout = {
     }
     await _instance?.shutdown();
     _instance = null;
+    _traceGate = null;
   },
 };
 export default Scout;

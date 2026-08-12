@@ -33,6 +33,25 @@ export interface TrackedSpan {
   /** Merges `extra` attributes, applies status, ends the span and records it. */
   end(extra?: Attributes, opts?: { status?: SpanStatusCode }): void;
 }
+/**
+ * Identity and transport a native host hands to a page it embeds. See
+ * {@link Scout.setWebViewBridge} for the modes these fields select.
+ */
+export interface WebViewBridgeOptions {
+  /** Host session id the page adopts, so both sides report one session. */
+  sessionId?: string;
+  /** Host's stable per-install anonymous user id. */
+  anonymousId?: string;
+  /** Receives a copy of every span the page emits, for the host to re-emit. */
+  send?: (payload: Record<string, unknown>) => void;
+  /**
+   * Stop POSTing spans from the page — the host's `send` becomes the only
+   * delivery path. Ignored unless `send` is supplied. Leave unset when the
+   * WebView can reach the collector itself; setting it without a working
+   * host-side relay silently drops the page's spans.
+   */
+  relay?: boolean;
+}
 const MAX_STACK_LEN = 8000;
 function errorFingerprint(type: string, message: string, stack: string): string {
   const firstFrame =
@@ -288,11 +307,28 @@ export class Scout {
   }
   private _anonymousId: string | null = null;
   private _webViewBridgeSend?: (payload: Record<string, unknown>) => void;
-  setWebViewBridge(bridge: {
-    sessionId?: string;
-    anonymousId?: string;
-    send?: (payload: Record<string, unknown>) => void;
-  }): void {
+  /**
+   * Adopts a native host's RUM identity so an embedded WebView and the app
+   * around it report as one session instead of two disconnected ones.
+   *
+   * Every field is optional, and the useful modes come from which ones you
+   * pass:
+   *
+   * - **Session adoption only** (`sessionId` + `anonymousId`, no `send`) —
+   *   the page keeps exporting to the collector itself, tagged with the
+   *   host's session. One copy of every signal, full fidelity. This is the
+   *   recommended default whenever the WebView can reach the collector.
+   * - **Relay** (`send` + `relay: true`) — the page stops POSTing spans and
+   *   hands them to the host instead. Use when the WebView cannot reach the
+   *   collector directly. Note that only spans travel the bridge: logs and
+   *   metrics keep exporting over HTTP, because the host-side re-emit
+   *   accepts spans only.
+   * - **Mirror** (`send`, `relay` false/omitted) — the page exports *and*
+   *   hands a copy to the host. Both copies reach the backend, so expect
+   *   duplicate spans. Opt into this only when you want the host to observe
+   *   web events locally.
+   */
+  setWebViewBridge(bridge: WebViewBridgeOptions): void {
     if (typeof bridge?.sessionId === 'string' && bridge.sessionId) {
       this.session.adoptExternalSessionId(bridge.sessionId);
     }
@@ -302,6 +338,10 @@ export class Scout {
     if (typeof bridge?.send === 'function') {
       this._webViewBridgeSend = bridge.send;
     }
+  }
+  /** Whether a host has taken over span delivery for this page. */
+  static isRelaying(bridge: WebViewBridgeOptions): boolean {
+    return bridge?.relay === true && typeof bridge?.send === 'function';
   }
   timeSinceAppStartMs(): number {
     return Date.now() - this._appStartedAt;
