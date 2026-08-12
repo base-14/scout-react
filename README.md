@@ -367,6 +367,39 @@ buffer](docs/configuration.md#offline-buffer).
 
 ---
 
+## Embedded in a native app? — the WebView bridge
+
+When this page runs inside a native app that also reports RUM (a Flutter app
+using [`scout_flutter`](https://pub.dev/packages/scout_flutter), say), the two
+SDKs would otherwise open two unrelated sessions for one user flow. The host
+fixes that by handing the page its identity:
+
+```ts
+Scout.setWebViewBridge({
+  sessionId: 'native-session-id',
+  anonymousId: 'native-anonymous-id',
+});
+```
+
+Safe to call before `initialize()` — the call is parked and applied once the
+SDK is up, which is what lets a host inject it as the page starts loading.
+
+Three modes, selected by which fields you pass:
+
+| Mode | Fields | Behaviour |
+|---|---|---|
+| **Session adoption** (recommended) | `sessionId`, `anonymousId` | Page keeps exporting to the collector, tagged with the host's session. One copy of every signal, full fidelity. |
+| **Relay** | `+ send`, `relay: true` | Page stops POSTing spans; the host delivers them. Use when the WebView can't reach the collector. **Spans only** — logs and metrics still go over HTTP. |
+| **Mirror** | `+ send` | Page exports *and* hands the host a copy. Both reach the backend, so expect duplicate spans. Only useful if the host needs to observe web events locally. |
+
+`Scout.isExportingSpans` reports whether the page still owns delivery — worth
+asserting in a smoke test, since a mis-wired relay is silently lossy.
+
+Prefer session adoption unless the WebView genuinely can't reach the
+collector; it needs no host-side relay code and loses nothing.
+
+---
+
 ## Out of scope (for now)
 
 | Signal | Why not |
