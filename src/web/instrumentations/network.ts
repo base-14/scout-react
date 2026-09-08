@@ -8,6 +8,8 @@ import { lookupProvider } from '../../core/provider-lookup';
 import { parseGraphQLRequest, parseGraphQLResponse } from '../../core/graphql-parser';
 import type { Attributes } from '../../core/types';
 import { uuidv4 } from '../../core/uuid';
+const baseHref = (): string =>
+  typeof location !== 'undefined' ? location.href : 'http://localhost';
 export function installNetworkTracker(scout: Scout): () => void {
   const ignore = scout.config.ignoreUrlPatterns ?? [];
   const firstPartyMatchers = compileFirstPartyMatchers(
@@ -24,13 +26,39 @@ export function installNetworkTracker(scout: Scout): () => void {
   };
   const isFirstParty = (url: string): boolean => {
     try {
-      const u = new URL(
-        url,
-        typeof location !== 'undefined' ? location.href : 'http://localhost',
-      );
+      const u = new URL(url, baseHref());
       return firstPartyMatchers.some((m) => m(u.host));
     } catch {
       return false;
+    }
+  };
+  const thirdPartyMode = scout.config.thirdPartyResources;
+  const isThirdParty = (url: string): boolean => {
+    try {
+      const u = new URL(url, baseHref());
+      // Same-origin is first-party whatever `firstPartyHosts` says — otherwise
+      // an app that never configured it would have its own URLs sanitized.
+      if (typeof location !== 'undefined' && u.origin === location.origin) return false;
+      return !firstPartyMatchers.some((m) => m(u.host));
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * The URL to record, or `null` to record nothing.
+   *
+   * Third-party beacons encode the current page URL in their query string, so
+   * a captured analytics `collect` call carried an entire dashboard URL —
+   * template variable values, and with them tenant pod names — into our traces.
+   */
+  const urlToRecord = (url: string): string | null => {
+    if (thirdPartyMode === 'full' || !isThirdParty(url)) return url;
+    if (thirdPartyMode === 'off') return null;
+    try {
+      const u = new URL(url, baseHref());
+      return u.origin + u.pathname;
+    } catch {
+      return null;
     }
   };
   const restore: Array<() => void> = [];
@@ -47,6 +75,10 @@ export function installNetworkTracker(scout: Scout): () => void {
       if (shouldSkip(url)) {
         return originalFetch(input as any, init);
       }
+      const recordedUrl = urlToRecord(url);
+      if (recordedUrl === null) {
+        return originalFetch(input as any, init);
+      }
       const start = performance.now();
       const headers = new Headers(init?.headers ?? (input as Request).headers ?? {});
       const providerAttrs = providerAttrsFor(url);
@@ -54,7 +86,7 @@ export function installNetworkTracker(scout: Scout): () => void {
       const tracked = scout.startTrackedSpan(SPAN.HTTP_REQUEST, {
         [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
         [ATTR.HTTP_METHOD]: method,
-        [ATTR.HTTP_URL]: url,
+        [ATTR.HTTP_URL]: recordedUrl,
         ...providerAttrs,
         ...graphqlAttrs,
         ...scout.commonAttributes(),
@@ -106,7 +138,7 @@ export function installNetworkTracker(scout: Scout): () => void {
         }
         scout.addBreadcrumb(
           BREADCRUMB_TYPE.HTTP,
-          `${method} ${url} → ${response.status}`,
+          `${method} ${recordedUrl} → ${response.status}`,
         );
         return response;
       } catch (error) {
@@ -119,7 +151,7 @@ export function installNetworkTracker(scout: Scout): () => void {
           httpSpan.setStatus({ code: SpanStatusCode.ERROR });
           tracked?.end();
         }
-        scout.addBreadcrumb(BREADCRUMB_TYPE.HTTP, `${method} ${url} → error`);
+        scout.addBreadcrumb(BREADCRUMB_TYPE.HTTP, `${method} ${recordedUrl} → error`);
         throw error;
       }
     };
@@ -142,7 +174,8 @@ export function installNetworkTracker(scout: Scout): () => void {
     };
     proto.send = function (this: any, body?: Document | XMLHttpRequestBodyInit | null) {
       const meta = this.__scout;
-      if (!meta || shouldSkip(meta.url)) {
+      const recordedUrl = meta ? urlToRecord(meta.url) : null;
+      if (!meta || shouldSkip(meta.url) || recordedUrl === null) {
         return origSend.call(this, body as any);
       }
       const start = performance.now();
@@ -152,7 +185,7 @@ export function installNetworkTracker(scout: Scout): () => void {
       const tracked = scout.startTrackedSpan(SPAN.HTTP_REQUEST, {
         [ATTR.HTTP_RESOURCE_ID]: uuidv4(),
         [ATTR.HTTP_METHOD]: meta.method,
-        [ATTR.HTTP_URL]: meta.url,
+        [ATTR.HTTP_URL]: recordedUrl,
         ...providerAttrsFor(meta.url),
         ...scout.commonAttributes(),
       });
@@ -186,7 +219,7 @@ export function installNetworkTracker(scout: Scout): () => void {
         );
         scout.addBreadcrumb(
           BREADCRUMB_TYPE.HTTP,
-          `${meta.method} ${meta.url} → ${errorMsg ?? status}`,
+          `${meta.method} ${recordedUrl} → ${errorMsg ?? status}`,
         );
       };
       this.addEventListener('loadend', () => finalize());

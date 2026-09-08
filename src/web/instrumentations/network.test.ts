@@ -246,3 +246,90 @@ describe('installNetworkTracker — XMLHttpRequest', () => {
     expect(xhr.headers.traceparent).toBeUndefined();
   });
 });
+
+// The leak this guards: a Google Analytics `collect` beacon encodes the current
+// page URL in its `dl` parameter, so a captured span carried an entire logX
+// dashboard URL — template variable values, and with them a tenant's
+// Kubernetes pod name — to Google and then into our own ClickHouse.
+describe('installNetworkTracker — third-party URLs', () => {
+  let recorder: Recorder;
+  let originalFetch: typeof fetch;
+  /** The underlying spy; `globalThis.fetch` is the tracker's wrapper after install. */
+  let fetchSpy: ReturnType<typeof vi.fn>;
+  const disposers: Array<() => void> = [];
+
+  const GA_BEACON =
+    'https://www.google-analytics.com/g/collect?v=2&tid=G-X' +
+    '&dl=https%3A%2F%2Fplay.example.io%2Faxi%2Fa%2Fapp%3Fvar-pod%3Dacct-7c5b757fd8-c5tjp';
+
+  beforeEach(() => {
+    recorder = makeRecorder();
+    originalFetch = globalThis.fetch;
+    fetchSpy = vi.fn(async () => new Response('ok', { status: 200 }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    disposers.splice(0).forEach((d) => d());
+    globalThis.fetch = originalFetch;
+  });
+
+  async function install(thirdPartyResources?: 'sanitized' | 'off' | 'full') {
+    const scout = new Scout(
+      {
+        serviceName: 't',
+        endpoint: 'http://collector.example:4318',
+        secure: false,
+        sessionSampleRate: 100,
+        firstPartyHosts: ['api.acme.com'],
+        ...(thirdPartyResources ? { thirdPartyResources } : {}),
+      },
+      memoryPlatform(),
+    );
+    await scout.bootstrap();
+    disposers.push(installNetworkTracker(scout));
+  }
+
+  const recordedUrls = () =>
+    recorder
+      .spans()
+      .filter((s) => s.name === SPAN.HTTP_REQUEST)
+      .map((s) => s.attributes[ATTR.HTTP_URL]);
+
+  it('strips the query string from a third-party URL by default', async () => {
+    await install();
+    await fetch(GA_BEACON);
+    expect(recordedUrls()).toEqual(['https://www.google-analytics.com/g/collect']);
+  });
+
+  it('keeps the query string on a declared first-party host', async () => {
+    await install();
+    await fetch('https://api.acme.com/users?token=abc');
+    expect(recordedUrls()).toEqual(['https://api.acme.com/users?token=abc']);
+  });
+
+  it('treats same-origin as first party even though it is not in firstPartyHosts', async () => {
+    await install();
+    await fetch('/api/dashboards/home?from=now-1h');
+    expect(recordedUrls()).toEqual(['/api/dashboards/home?from=now-1h']);
+  });
+
+  it('drops the span entirely under "off"', async () => {
+    await install('off');
+    await fetch(GA_BEACON);
+    await fetch('https://api.acme.com/users?token=abc');
+    expect(recordedUrls()).toEqual(['https://api.acme.com/users?token=abc']);
+  });
+
+  it('records the URL verbatim under "full"', async () => {
+    await install('full');
+    await fetch(GA_BEACON);
+    expect(recordedUrls()).toEqual([GA_BEACON]);
+  });
+
+  it('still performs the request when the span is dropped', async () => {
+    await install('off');
+    const res = await fetch(GA_BEACON);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+});

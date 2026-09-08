@@ -3,6 +3,7 @@ import { SPAN, BREADCRUMB_TYPE } from '../../core/spans';
 import { DEFAULT_INTERACTION_EVENTS, type InteractionEvent } from '../../core/config';
 import type { Scout } from '../../core/scout';
 import type { Attributes } from '../../core/types';
+import { recordInteraction } from './interaction-registry';
 import { uuidv4 } from '../../core/uuid';
 /**
  * Fields whose *existence* we still report, but which must never contribute a
@@ -39,8 +40,9 @@ export function installTapTracker(scout: Scout): () => void {
       const { description, source } = describeElement(target);
       const typeName = target.tagName ? target.tagName.toLowerCase() : 'unknown';
       const rect = target.getBoundingClientRect?.();
+      const interactionId = uuidv4();
       scout.emitSpan(SPAN.USER_INTERACTION, {
-        [ATTR.USER_INTERACTION_ID]: uuidv4(),
+        [ATTR.USER_INTERACTION_ID]: interactionId,
         [ATTR.USER_INTERACTION_TYPE]: kind,
         [ATTR.USER_INTERACTION_TARGET]: description,
         [ATTR.USER_INTERACTION_TARGET_TYPE]: typeName,
@@ -57,6 +59,15 @@ export function installTapTracker(scout: Scout): () => void {
         ...scout.commonAttributes(),
       });
       scout.addBreadcrumb(BREADCRUMB_TYPE.TAP, `${kind} ${typeName}: ${description}`);
+      // Let the frustration tracker point back at this span rather than
+      // emitting an anonymous twin for the same gesture.
+      recordInteraction({
+        id: interactionId,
+        target,
+        description,
+        targetType: typeName,
+        at: performance.now(),
+      });
     } catch {}
   };
   if (enabled.has('click')) {
