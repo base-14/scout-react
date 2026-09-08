@@ -120,6 +120,12 @@ export const ATTR = {
   CRASH_LAST_SCREEN: 'crash.last_screen',
   CRASH_TYPE: 'crash.type',
   CRASH_REASON: 'crash.reason',
+  /** Where the session actually died. Resource attributes are frozen at
+   *  provider construction, so a deferred marker cannot restate them; these
+   *  carry the originating identity as span attributes instead. */
+  CRASH_SERVICE_NAME: 'crash.service.name',
+  CRASH_SERVICE_VERSION: 'crash.service.version',
+  CRASH_ENVIRONMENT: 'crash.environment',
   /** Which detection path produced the record: exit_info, ndk_signal, ... */
   CRASH_SOURCE: 'crash.source',
   CRASH_DRAIN_APP_STATE: 'crash.drain_app_state',
