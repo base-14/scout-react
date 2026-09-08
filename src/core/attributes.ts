@@ -140,8 +140,12 @@ export const ATTR = {
   LONG_TASK_STYLE_AND_LAYOUT_START_MS: 'long_task.style_and_layout_start_ms',
   LONG_TASK_FIRST_UI_EVENT_TIMESTAMP_MS: 'long_task.first_ui_event_timestamp_ms',
   LONG_TASK_SCRIPTS_JSON: 'long_task.scripts_json',
-  ANR_DURATION: 'anr.duration',
-  ANR_THRESHOLD: 'anr.threshold',
+  /** Milliseconds. Named for its unit so it can never be confused with the
+   *  pre-0.1.17 `anr.duration`, which carried seconds under an unsuffixed key. */
+  ANR_DURATION_MS: 'anr.duration_ms',
+  ANR_THRESHOLD_MS: 'anr.threshold_ms',
+  /** `visible` on every span the detector emits — hidden tabs are not sampled. */
+  ANR_VISIBILITY_STATE: 'anr.visibility_state',
   ANR_MAIN_THREAD_STACK: 'anr.main_thread_stack',
   ANR_THREADS_JSON: 'anr.threads_json',
   ANR_THREAD_COUNT: 'anr.thread_count',

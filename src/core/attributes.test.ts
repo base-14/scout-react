@@ -22,7 +22,9 @@ describe('attribute / span / metric name contract', () => {
     expect(ATTR.APP_STARTUP_TYPE).toBe('app_startup.type');
     expect(ATTR.APP_STARTUP_DURATION).toBe('app_startup.duration');
     expect(ATTR.LONG_TASK_DURATION).toBe('long_task.duration');
-    expect(ATTR.ANR_DURATION).toBe('anr.duration');
+    expect(ATTR.ANR_DURATION_MS).toBe('anr.duration_ms');
+    expect(ATTR.ANR_THRESHOLD_MS).toBe('anr.threshold_ms');
+    expect(ATTR.ANR_VISIBILITY_STATE).toBe('anr.visibility_state');
     expect(ATTR.CRASH_SERVICE_NAME).toBe('crash.service.name');
     expect(ATTR.CRASH_SERVICE_VERSION).toBe('crash.service.version');
     expect(ATTR.CRASH_ENVIRONMENT).toBe('crash.environment');

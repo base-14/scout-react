@@ -44,8 +44,8 @@ export async function installNativeAnrDetector(
     const screen = getCurrentScreen();
     const source = typeof payload?.source === 'string' ? payload.source : 'main';
     const attrs: Record<string, unknown> = {
-      [ATTR.ANR_DURATION]: durationMs / 1000,
-      [ATTR.ANR_THRESHOLD]: Number(payload?.thresholdMs ?? thresholdMs) / 1000,
+      [ATTR.ANR_DURATION_MS]: durationMs,
+      [ATTR.ANR_THRESHOLD_MS]: Number(payload?.thresholdMs ?? thresholdMs),
       'anr.source_thread': source,
       ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
       [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serialize(),
@@ -64,7 +64,12 @@ export async function installNativeAnrDetector(
       attrs[ATTR.ANR_THREAD_COUNT] = payload.threadCount;
     }
     try {
-      scout.emitSpan(SPAN.ANR, attrs as Record<string, never>);
+      // The hang belongs in the span's duration, not only in an attribute.
+      const endTime = Date.now();
+      scout.emitSpan(SPAN.ANR, attrs as Record<string, never>, {
+        startTime: endTime - durationMs,
+        endTime,
+      });
       scout.breadcrumbsManager.add(
         BREADCRUMB_TYPE.ANR,
         `App not responding (${source}): ${Math.round(durationMs)}ms`,
