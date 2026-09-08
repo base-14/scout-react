@@ -31,6 +31,7 @@ await Scout.initialize({
 | `headers` | `Record<string, string>` | `{}` | Extra HTTP headers on every export. Use for auth tokens, tenant IDs, etc. |
 | `firstPartyHosts` | `Array<string \| RegExp>` | `[]` | Hosts considered "your" backend. Outbound `fetch` and `XMLHttpRequest` calls to these hosts get a `traceparent` header so backend traces correlate. |
 | `ignoreUrlPatterns` | `RegExp[]` | `[]` | URLs matching any of these are not auto-instrumented (no `http.request` span, no breadcrumb). |
+| `thirdPartyResources` | `'sanitized' \| 'off' \| 'full'` | `'sanitized'` | How much of a **non**-first-party request URL to record. `sanitized` keeps origin and path and drops the query string and fragment; `off` records no span at all for third-party hosts; `full` records the URL verbatim. Same-origin requests are always first-party, whatever `firstPartyHosts` says. |
 
 ### Rotating an auth token
 

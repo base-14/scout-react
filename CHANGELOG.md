@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-09-07
+
+Eight data-quality defects found validating browser RUM against live data. Four
+of them changed what the SDK writes to the wire; see **Breaking** below.
+
+### Fixed
+
+- **ANR detection no longer reports background-tab timer throttling as a hang**
+  (B14-1858). Browsers clamp timers in hidden tabs to roughly once a minute, and
+  the detector read its own throttled lateness as a blocked main thread — one
+  false `anr` span per minute, indefinitely, from every backgrounded tab. The
+  main thread now stops beating while hidden and resets the worker's baseline
+  before it resumes, so neither the throttled interval nor the gap on return is
+  charged as a hang. Spans carry `anr.visibility_state`; the SDK previously
+  recorded no visibility signal at all.
+
+- **`anr` spans now carry the hang in the span's own duration** (B14-1862).
+  They were emitted as zero-duration markers, so the trace waterfall, p95
+  duration panels and anything else generic over spans saw `0`; the real value
+  was reachable only through a bespoke string attribute.
+
+- **A deferred crash marker can no longer be attributed to a different tenant**
+  (B14-1860). The marker lived under one unscoped `localStorage` key, and a
+  single origin can serve many tenants — so a tab that died in one tenant was
+  filed against whichever tenant the browser opened next, carrying its URLs and
+  screen names across. The key is now scoped by service name and environment.
+  The marker also records the originating `service.name`, `service.version` and
+  `environment`, reported as `crash.service.name`, `crash.service.version` and
+  `crash.environment`, and the span's `screen.name` is the dead session's rather
+  than the detecting page's.
+
+- **An ordinary tab close is no longer counted as a crash** (B14-1861).
+  `pagehide` does not fire on force-quit, OS shutdown, tab discard or
+  task-switcher eviction, so its absence is not evidence of a crash. These
+  markers were written as `app_crash`, which feeds crash counters — routine user
+  behaviour was depressing crash-free rate.
+
+- **Web-vital histograms no longer have unbounded attribute cardinality**
+  (B14-1859). `web.vital.id` (unique per measurement), `web.vital.value`
+  (already the histogram's sum) and `web.vital.target_selector` (a ~250-character
+  CSS chain) were metric *dimensions*, so every measurement became its own time
+  series. They remain on the `web_vital` span, which is where dashboards read
+  them.
+
+- **One-shot web vitals are exported once instead of every interval**
+  (B14-1859). FCP, LCP and TTFB fire once per page load, but histograms were
+  cumulative with a fixed start time, so the same `count=1` point was re-exported
+  every 30 seconds for the life of the page — roughly 180 rows for 3 real
+  measurements in a 30-minute session. Histograms are now delta; counters remain
+  cumulative.
+
+- **`user.id` is no longer written into metric dimensions** (B14-1865). It is
+  frequently an email address, and metric attributes are retained longer, rolled
+  up harder and far more expensive to delete selectively than spans. It stays on
+  spans and logs, where session correlation actually needs it.
+
+- **A frustrated click no longer double-counts as two interactions**
+  (B14-1863). A dead or rage click emitted a second `user_interaction` span
+  rather than a distinct event, inflating `view.action.count` by one for every
+  frustration — skewing engagement metrics by exactly the users having the worst
+  experience. Frustrations now emit `user_frustration` and carry the originating
+  `user_interaction.id`, `user_interaction.target` and
+  `user_interaction.target.type` so the two can be joined.
+
+- **A rage episode reports once, not once per click in the run** — the 120ms
+  rage timer and the 600ms dead-click timer were independent, so one gesture
+  could produce three spans.
+
+- **Clicks in the first 100ms of a page are no longer classified as
+  `error_click`.** The "last error seen" sentinel was `0`, which
+  `performance.now()` is also close to just after load.
+
+- **Third-party request URLs are sanitized by default** (B14-1864). Analytics
+  beacons encode the current page URL in their query string, so a captured
+  `collect` call carried an entire dashboard URL — template variable values, and
+  with them a tenant's Kubernetes pod name — into stored traces. Query string
+  and fragment are now dropped for non-first-party hosts. See
+  `thirdPartyResources`.
+
+### Added
+
+- `thirdPartyResources: 'sanitized' | 'off' | 'full'` (default `'sanitized'`)
+  controls how much of a non-first-party request URL is recorded. Same-origin
+  requests are always treated as first-party, whatever `firstPartyHosts` says.
+
+### Breaking
+
+- `anr.duration` and `anr.threshold` are replaced by **`anr.duration_ms`** and
+  **`anr.threshold_ms`**. The old keys carried *seconds* under names that gave
+  no unit, while the SDK's own option is `anrThresholdMs` — an inconsistency
+  that already produced a 1000x display bug downstream. The keys are renamed
+  rather than silently redefined so old and new rows stay distinguishable:
+  read `coalesce(anr.duration_ms, anr.duration * 1000)` while both exist.
+  Applies to web and React Native.
+
+- Unclean terminations are emitted as **`app_unclean_exit`**, not `app_crash`.
+  Consumers that count crashes need no change; consumers that want to see
+  unclean exits must add the new span name.
+
+- Frustration signals are emitted as **`user_frustration`**, not
+  `user_interaction`. Aggregations over `user_interaction` become correct
+  automatically; anything that specifically wanted frustration spans must add
+  the new name.
+
+- Metric attributes are now a bounded set — `session.id`, `session.type`,
+  `session.sample_rate` and `screen.name`. Attributes set via
+  `setRuntimeAttribute()` / `setSessionAttributes()` and all `user.*` attributes
+  no longer appear on metrics. They are unchanged on spans and logs.
+
 ## [0.1.16] - 2026-08-11
 
 ### Added

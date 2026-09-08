@@ -13,6 +13,11 @@ export default defineConfig({
                 'src/web/instrumentations/route.ts',
                 'src/web/instrumentations/error.ts',
                 'src/web/instrumentations/network.ts',
+                'src/web/instrumentations/anr.ts',
+                'src/web/instrumentations/crash.ts',
+                'src/web/instrumentations/frustration.ts',
+                'src/web/instrumentations/web-vitals.ts',
+                'src/web/instrumentations/interaction-registry.ts',
             ],
             exclude: ['**/*.test.ts', '**/types.ts', 'src/test/**'],
             thresholds: {
