@@ -358,3 +358,54 @@ describe('sampling gates fail closed before the session is hydrated', () => {
     expect(recorder.spans()).toHaveLength(0);
   });
 });
+
+describe('view counters', () => {
+  let recorder: Recorder;
+  beforeEach(() => {
+    recorder = makeRecorder();
+  });
+
+  async function countersFor(name: string, attrs: Record<string, unknown> = {}) {
+    const s = await makeScout();
+    s.setCurrentScreen('/checkout');
+    s.emitSpan(name, attrs as never);
+    const resourceMetrics = await recorder.metrics();
+    const out: Record<string, number> = {};
+    for (const rm of resourceMetrics) {
+      for (const sm of rm.scopeMetrics) {
+        for (const m of sm.metrics) {
+          for (const dp of m.dataPoints) {
+            out[m.descriptor.name] = (out[m.descriptor.name] ?? 0) + Number(dp.value);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  it('counts a plain interaction as an action and nothing else', async () => {
+    const counters = await countersFor(SPAN.USER_INTERACTION);
+    expect(counters['view.action.count']).toBe(1);
+    expect(counters['view.frustration.count'] ?? 0).toBe(0);
+  });
+
+  it('does not count a frustration as another action', async () => {
+    // The frustration describes an interaction that was already counted;
+    // counting it again inflated view.action.count by one per frustrated click.
+    const counters = await countersFor(SPAN.USER_FRUSTRATION, {
+      [ATTR.USER_INTERACTION_FRUSTRATION_TYPE]: 'dead_click',
+    });
+    expect(counters['view.action.count'] ?? 0).toBe(0);
+    expect(counters['view.frustration.count']).toBe(1);
+  });
+
+  it('does not count an unclean exit as a crash', async () => {
+    const counters = await countersFor(SPAN.APP_UNCLEAN_EXIT);
+    expect(counters['view.crash.count'] ?? 0).toBe(0);
+  });
+
+  it('still counts a real crash', async () => {
+    const counters = await countersFor(SPAN.APP_CRASH);
+    expect(counters['view.crash.count']).toBe(1);
+  });
+});

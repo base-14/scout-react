@@ -138,7 +138,16 @@ export function installWebVitalsTracker(scout: Scout): () => void {
       if (m.name === 'CLS') extras = extractCLS(m);
       else if (m.name === 'INP') extras = extractINP(m);
       else if (m.name === 'LCP') extras = extractLCP(m);
-      target.emitHistogram(metricName, m.value, { ...base, ...extras });
+      // The metric gets only dimensions worth grouping by. `web.vital.id` is
+      // unique per measurement, `web.vital.value` is already the histogram's
+      // sum/min/max, and `web.vital.target_selector` is a ~250-character CSS
+      // chain — on a histogram each of those makes every measurement its own
+      // time series. They all survive on the span below, which is where the
+      // dashboards read them from.
+      target.emitHistogram(metricName, m.value, {
+        [ATTR.WEB_VITAL_NAME]: m.name,
+        [ATTR.WEB_VITAL_RATING]: m.rating,
+      });
       target.emitSpan(SPAN.WEB_VITAL, {
         ...base,
         ...extras,
