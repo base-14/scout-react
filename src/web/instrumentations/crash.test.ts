@@ -6,15 +6,17 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import { makeRecorder, memoryPlatform, type Recorder } from '../../test/recorder';
 
-const MARKER_KEY = 'scout.session-marker';
+const LEGACY_MARKER_KEY = 'scout.session-marker';
+const MARKER_KEY = `${LEGACY_MARKER_KEY}:test-svc:`;
 
-async function makeScout() {
+async function makeScout(identity: { serviceName?: string; environment?: string } = {}) {
   const s = new Scout(
     {
       serviceName: 'test-svc',
       endpoint: 'http://localhost:4318',
       secure: false,
       sessionSampleRate: 100,
+      ...identity,
     },
     memoryPlatform(),
   );
@@ -38,7 +40,7 @@ function memoryStorage() {
   };
 }
 
-describe('app_crash from the session marker', () => {
+describe('app_unclean_exit from the session marker', () => {
   let recorder: Recorder;
   let storage: ReturnType<typeof memoryStorage>;
   const disposers: Array<() => void> = [];
@@ -53,9 +55,9 @@ describe('app_crash from the session marker', () => {
     vi.useRealTimers();
   });
 
-  function seedCrashedSession(marker: Record<string, unknown>) {
+  function seedCrashedSession(marker: Record<string, unknown>, key: string = MARKER_KEY) {
     storage.setItem(
-      MARKER_KEY,
+      key,
       JSON.stringify({
         sessionId: 'dead-session',
         startedAt: '2026-01-01T00:00:00.000Z',
@@ -70,7 +72,7 @@ describe('app_crash from the session marker', () => {
     seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
     const s = await makeScout();
     disposers.push(installCrashDetector(s));
-    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_CRASH);
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
     expect(span).toBeDefined();
     expect(span!.attributes[ATTR.SESSION_ID]).toBe('dead-session');
     expect(span!.attributes[ATTR.SESSION_ID]).not.toBe(s.sessionId);
@@ -82,7 +84,7 @@ describe('app_crash from the session marker', () => {
     seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
     const s = await makeScout();
     disposers.push(installCrashDetector(s));
-    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_CRASH);
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
     expect(span!.attributes[ATTR.CRASH_TIMESTAMP]).toBe('2026-01-01T00:05:00.000Z');
   });
 
@@ -92,7 +94,7 @@ describe('app_crash from the session marker', () => {
     seedCrashedSession({});
     const s = await makeScout();
     disposers.push(installCrashDetector(s));
-    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_CRASH);
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
     expect(span!.attributes[ATTR.CRASH_TIMESTAMP]).toBe('2026-01-01T00:00:00.000Z');
   });
 
@@ -121,7 +123,7 @@ describe('app_crash from the session marker', () => {
     await s.bootstrap();
     s.addBreadcrumb('tap', 'a crumb from the new session');
     disposers.push(installCrashDetector(s));
-    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_CRASH);
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
     const crumbs = JSON.parse(String(span!.attributes[ATTR.BREADCRUMBS]));
     expect(crumbs).toHaveLength(1);
     expect(crumbs[0].message).toBe('screen: /checkout');
@@ -131,7 +133,102 @@ describe('app_crash from the session marker', () => {
     seedCrashedSession({ active: false });
     const s = await makeScout();
     disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeUndefined();
+  });
+
+  it('never emits app_crash, so a routine tab close cannot depress crash-free rate', async () => {
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
     expect(recorder.spans().find((sp) => sp.name === SPAN.APP_CRASH)).toBeUndefined();
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeDefined();
+  });
+
+  it('does not read another tenant’s marker from the same origin', async () => {
+    // One host serves many tenants under different paths; before the key was
+    // scoped, oteldemo2's dead tab was filed against whichever tenant loaded next.
+    seedCrashedSession(
+      { sessionId: 'oteldemo2-session', lastScreen: '/oteldemo2/a/base14-logx-app' },
+      `${LEGACY_MARKER_KEY}:other-svc:nbg1-oteldemo2`,
+    );
+    const s = await makeScout({ serviceName: 'test-svc', environment: 'nbg1-axi' });
+    disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeUndefined();
+  });
+
+  it('reads back only its own tenant’s marker', async () => {
+    seedCrashedSession(
+      { sessionId: 'axi-session' },
+      `${LEGACY_MARKER_KEY}:test-svc:nbg1-axi`,
+    );
+    const s = await makeScout({ environment: 'nbg1-axi' });
+    disposers.push(installCrashDetector(s));
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
+    expect(span!.attributes[ATTR.CRASH_PREVIOUS_SESSION_ID]).toBe('axi-session');
+  });
+
+  it('discards an unattributable legacy marker instead of guessing a tenant', async () => {
+    seedCrashedSession({ sessionId: 'ambiguous' }, LEGACY_MARKER_KEY);
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeUndefined();
+    expect(storage.getItem(LEGACY_MARKER_KEY)).toBeNull();
+  });
+
+  it('carries the originating identity, which resource attributes cannot restate', async () => {
+    seedCrashedSession(
+      {
+        lastActiveAt: '2026-01-01T00:05:00.000Z',
+        serviceName: 'test-svc',
+        serviceVersion: '9.9.9',
+        environment: 'nbg1-axi',
+      },
+      `${LEGACY_MARKER_KEY}:test-svc:nbg1-axi`,
+    );
+    const s = await makeScout({ environment: 'nbg1-axi' });
+    disposers.push(installCrashDetector(s));
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
+    expect(span!.attributes[ATTR.CRASH_SERVICE_NAME]).toBe('test-svc');
+    expect(span!.attributes[ATTR.CRASH_SERVICE_VERSION]).toBe('9.9.9');
+    expect(span!.attributes[ATTR.CRASH_ENVIRONMENT]).toBe('nbg1-axi');
+  });
+
+  it('reports the dead session’s screen, not the page that detected it', async () => {
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
+    const s = await makeScout();
+    s.setCurrentScreen('/the-new-page');
+    disposers.push(installCrashDetector(s));
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
+    expect(span!.attributes[ATTR.SCREEN_NAME]).toBe('/checkout');
+    expect(span!.attributes[ATTR.CRASH_LAST_SCREEN]).toBe('/checkout');
+  });
+
+  it('survives the current session being sampled out', async () => {
+    // The marker describes a previous session; the live session's sample
+    // decision has nothing to say about whether it should be reported.
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
+    const s = new Scout(
+      {
+        serviceName: 'test-svc',
+        endpoint: 'http://localhost:4318',
+        secure: false,
+        sessionSampleRate: 0,
+      },
+      memoryPlatform(),
+    );
+    await s.bootstrap();
+    disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeDefined();
   });
 
   it('records the live session’s own start time in the marker it writes', async () => {

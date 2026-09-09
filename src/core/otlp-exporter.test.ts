@@ -163,11 +163,10 @@ describe('otlp-exporter — at-most-once delivery', () => {
     expect(fetchMock.mock.calls[1]![1].headers.authorization).toBe('Bearer refreshed');
   });
 
-  it('keeps the stock exporter’s CUMULATIVE temporality', () => {
+  it('keeps counters CUMULATIVE', () => {
     const exporter = createOtlpMetricExporter({ url: 'https://c.test/v1/metrics' });
     for (const t of [
       InstrumentType.COUNTER,
-      InstrumentType.HISTOGRAM,
       InstrumentType.OBSERVABLE_GAUGE,
       InstrumentType.UP_DOWN_COUNTER,
     ]) {
@@ -175,5 +174,12 @@ describe('otlp-exporter — at-most-once delivery', () => {
         AggregationTemporality.CUMULATIVE,
       );
     }
+  });
+
+  it('exports histograms as DELTA so a one-shot vital is written once', () => {
+    const exporter = createOtlpMetricExporter({ url: 'https://c.test/v1/metrics' });
+    expect(exporter.selectAggregationTemporality!(InstrumentType.HISTOGRAM)).toBe(
+      AggregationTemporality.DELTA,
+    );
   });
 });

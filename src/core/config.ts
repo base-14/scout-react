@@ -17,6 +17,7 @@ export const DEFAULT_INTERACTION_EVENTS: InteractionEvent[] = [
   'submit',
   'input',
 ];
+export type ThirdPartyResourceMode = 'sanitized' | 'off' | 'full';
 export interface ScoutConfig {
   serviceName: string;
   endpoint: string;
@@ -60,6 +61,19 @@ export interface ScoutConfig {
   alwaysCaptureErrors?: boolean;
   firstPartyHosts?: Array<string | RegExp>;
   ignoreUrlPatterns?: RegExp[];
+  /**
+   * How much of a non-first-party request URL to record.
+   *
+   * - `sanitized` (default) — keep origin and path, drop the query string and
+   *   fragment. Third-party beacons routinely encode the current page URL in
+   *   their query (an analytics `collect` call carries the full dashboard URL,
+   *   template variable values included), so the query is where the leak is.
+   * - `off` — do not record third-party requests at all.
+   * - `full` — record the URL verbatim, as before 0.1.17.
+   *
+   * Same-origin requests are always first-party, whatever `firstPartyHosts` says.
+   */
+  thirdPartyResources?: ThirdPartyResourceMode;
   maxOfflineStorageMb?: number;
   beforeSend?: BeforeSendCallback;
   customTargetResolver?: CustomTargetResolver;
@@ -202,6 +216,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     alwaysCaptureErrors: config.alwaysCaptureErrors ?? true,
     firstPartyHosts: config.firstPartyHosts,
     ignoreUrlPatterns: config.ignoreUrlPatterns,
+    thirdPartyResources: config.thirdPartyResources ?? 'sanitized',
     maxOfflineStorageMb: config.maxOfflineStorageMb ?? 5,
     beforeSend: config.beforeSend,
     customTargetResolver: config.customTargetResolver,

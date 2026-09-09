@@ -1,5 +1,10 @@
 export const SPAN = {
   USER_INTERACTION: 'user_interaction',
+  /** A frustration signal (dead / rage / error click) about an interaction.
+   *  A separate name because the original `user_interaction` span is already
+   *  emitted and ended by the time detection completes, and re-emitting under
+   *  that name double-counted every frustrated click in `view.action.count`. */
+  USER_FRUSTRATION: 'user_frustration',
   SCREEN_VIEW: 'screen_view',
   SCREEN_LOAD: 'screen_load',
   VIEW_SESSION: 'view_session',
@@ -7,6 +12,11 @@ export const SPAN = {
   APP_PAUSED: 'app_paused',
   APP_RESUMED: 'app_resumed',
   APP_CRASH: 'app_crash',
+  /** A session that ended without a clean shutdown signal. Deliberately NOT
+   *  `app_crash`: `pagehide` does not fire on force-quit, OS shutdown, tab
+   *  discard or task-switcher eviction, so its absence is not evidence of a
+   *  crash and must not depress crash-free rate. */
+  APP_UNCLEAN_EXIT: 'app_unclean_exit',
   NATIVE_CRASH: 'native_crash',
   ERROR: 'error',
   LONG_TASK: 'long_task',

@@ -36,21 +36,27 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
         const common = scout.commonAttributes();
         common[ATTR.SESSION_ID] = prev.sessionId;
         common[ATTR.SESSION_START_TIME] = prev.startedAt;
-        scout.emitSpan(SPAN.APP_CRASH, {
-          [ATTR.CRASH_PREVIOUS_SESSION_ID]: prev.sessionId,
-          [ATTR.CRASH_STARTED_AT]: prev.startedAt,
-          // When the app was last known alive, not when we noticed on relaunch.
-          [ATTR.CRASH_TIMESTAMP]: prev.lastActiveAt ?? prev.startedAt,
-          [ATTR.CRASH_STATUS]: 'session_marker',
-          [ATTR.CRASH_LAST_SCREEN]:
-            prev.lastScreen ||
-            lastScreenFromBreadcrumbs(scout.breadcrumbsManager.orphaned()),
-          [ATTR.CRASH_TYPE]: 'unclean_termination',
-          // The dead session's trail — the live one is empty this early, and
-          // would describe the wrong session anyway.
-          [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serializeOrphaned() ?? '[]',
-          ...common,
-        });
+        scout.emitSpan(
+          SPAN.APP_UNCLEAN_EXIT,
+          {
+            [ATTR.CRASH_PREVIOUS_SESSION_ID]: prev.sessionId,
+            [ATTR.CRASH_STARTED_AT]: prev.startedAt,
+            // When the app was last known alive, not when we noticed on relaunch.
+            [ATTR.CRASH_TIMESTAMP]: prev.lastActiveAt ?? prev.startedAt,
+            [ATTR.CRASH_STATUS]: 'session_marker',
+            [ATTR.CRASH_LAST_SCREEN]:
+              prev.lastScreen ||
+              lastScreenFromBreadcrumbs(scout.breadcrumbsManager.orphaned()),
+            [ATTR.CRASH_TYPE]: 'unclean_termination',
+            // The dead session's trail — the live one is empty this early, and
+            // would describe the wrong session anyway.
+            [ATTR.BREADCRUMBS]: scout.breadcrumbsManager.serializeOrphaned() ?? '[]',
+            ...common,
+          },
+          // Reports on a *previous* session, so the current session's sample
+          // decision must not gate it. Not an error-class span, so no bypass.
+          { forceSample: true },
+        );
       }
     }
   } catch {}

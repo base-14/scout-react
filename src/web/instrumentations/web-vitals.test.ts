@@ -70,6 +70,14 @@ describe('installWebVitalsTracker', () => {
     return d;
   }
 
+  /** Same, but hands back the Scout so a test can inspect what it emitted. */
+  async function installWithScout(): Promise<Scout> {
+    const scout = await newScout();
+    scout.setCurrentScreen('/checkout');
+    disposers.push(installWebVitalsTracker(scout));
+    return scout;
+  }
+
   it('emits a web_vital span when a metric settles', async () => {
     await install();
     fire('LCP', 2400);
@@ -96,6 +104,77 @@ describe('installWebVitalsTracker', () => {
     expect(Object.keys(span.attributes)).not.toContain('vital.value');
     expect(Object.keys(span.attributes)).not.toContain('vital.rating');
     expect(Object.keys(span.attributes)).not.toContain('vital.id');
+  });
+
+  // Metric dimensions are not span attributes: otel_metrics_histogram sorts by
+  // Attributes before TimeUnix, so a per-measurement dimension gives every
+  // point its own never-co-located time series. These assert the histogram's
+  // dimensions stay bounded even though the span above keeps the full detail.
+  describe('histogram dimensions', () => {
+    async function vitalPointAttributes(scout: Scout) {
+      const resourceMetrics = await recorder.metrics();
+      const points = resourceMetrics
+        .flatMap((rm) => rm.scopeMetrics)
+        .flatMap((sm) => sm.metrics)
+        .filter((m) => m.descriptor.name.startsWith('web.vital.'))
+        .flatMap((m) => m.dataPoints);
+      expect(scout).toBeDefined();
+      expect(points.length).toBeGreaterThan(0);
+      return points.map((p) => p.attributes);
+    }
+
+    it('carries only bounded dimensions', async () => {
+      const scout = await installWithScout();
+      fire('LCP', 2400);
+      for (const attrs of await vitalPointAttributes(scout)) {
+        expect(Object.keys(attrs).sort()).toEqual([
+          'screen.name',
+          'session.id',
+          'session.sample_rate',
+          'session.type',
+          'web.vital.name',
+          'web.vital.rating',
+        ]);
+      }
+    });
+
+    it('drops the per-measurement id, the redundant value and the target selector', async () => {
+      const scout = await installWithScout();
+      fire('LCP', 2400);
+      for (const attrs of await vitalPointAttributes(scout)) {
+        expect(attrs).not.toHaveProperty('web.vital.id');
+        expect(attrs).not.toHaveProperty('web.vital.value');
+        expect(attrs).not.toHaveProperty('web.vital.target_selector');
+      }
+    });
+
+    it('never writes user identity into a metric dimension', async () => {
+      const scout = await installWithScout();
+      scout.setUser('someone@example.com', { plan: 'pro' });
+      fire('LCP', 2400);
+      for (const attrs of await vitalPointAttributes(scout)) {
+        expect(attrs).not.toHaveProperty('user.id');
+        expect(attrs).not.toHaveProperty('user.plan');
+        expect(attrs).not.toHaveProperty('user.anonymous_id');
+        expect(Object.keys(attrs).some((k) => k.startsWith('user.'))).toBe(false);
+      }
+    });
+
+    it('keeps session.id, which the screen web-vitals dashboards filter on', async () => {
+      const scout = await installWithScout();
+      fire('LCP', 2400);
+      for (const attrs of await vitalPointAttributes(scout)) {
+        expect(attrs['session.id']).toBe(scout.sessionId);
+      }
+    });
+
+    it('keeps user identity on the span, where correlation belongs', async () => {
+      const scout = await installWithScout();
+      scout.setUser('someone@example.com');
+      fire('LCP', 2400);
+      const [span] = recorder.spans().filter((s) => s.name === SPAN.WEB_VITAL);
+      expect(span.attributes['user.id']).toBe('someone@example.com');
+    });
   });
 
   // The observers cannot be torn down, so reinstalling must reuse the existing

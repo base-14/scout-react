@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ATTR } from './attributes';
-import { SPAN, BREADCRUMB_TYPE } from './spans';
+import { SPAN, BREADCRUMB_TYPE, ERROR_CLASS_SPANS } from './spans';
 import { METRIC } from './metrics';
 describe('attribute / span / metric name contract', () => {
   it('keeps semantic attribute keys stable', () => {
@@ -22,7 +22,13 @@ describe('attribute / span / metric name contract', () => {
     expect(ATTR.APP_STARTUP_TYPE).toBe('app_startup.type');
     expect(ATTR.APP_STARTUP_DURATION).toBe('app_startup.duration');
     expect(ATTR.LONG_TASK_DURATION).toBe('long_task.duration');
-    expect(ATTR.ANR_DURATION).toBe('anr.duration');
+    expect(ATTR.ANR_DURATION_MS).toBe('anr.duration_ms');
+    expect(ATTR.ANR_THRESHOLD_MS).toBe('anr.threshold_ms');
+    expect(ATTR.ANR_VISIBILITY_STATE).toBe('anr.visibility_state');
+    expect(ATTR.CRASH_SERVICE_NAME).toBe('crash.service.name');
+    expect(ATTR.CRASH_SERVICE_VERSION).toBe('crash.service.version');
+    expect(ATTR.CRASH_ENVIRONMENT).toBe('crash.environment');
+    expect(ATTR.USER_INTERACTION_FRUSTRATION_TYPE).toBe('action.frustration.type');
     expect(ATTR.DEVICE_BATTERY_LEVEL).toBe('device.battery.level');
     expect(ATTR.DEVICE_BATTERY_STATE).toBe('device.battery.state');
     expect(ATTR.NETWORK_CONNECTION_TYPE).toBe('network.connection.type');
@@ -36,11 +42,20 @@ describe('attribute / span / metric name contract', () => {
     expect(SPAN.APP_PAUSED).toBe('app_paused');
     expect(SPAN.APP_RESUMED).toBe('app_resumed');
     expect(SPAN.APP_CRASH).toBe('app_crash');
+    expect(SPAN.APP_UNCLEAN_EXIT).toBe('app_unclean_exit');
+    expect(SPAN.USER_FRUSTRATION).toBe('user_frustration');
     expect(SPAN.ERROR).toBe('error');
     expect(SPAN.LONG_TASK).toBe('long_task');
     expect(SPAN.FROZEN_FRAME).toBe('frozen_frame');
     expect(SPAN.ANR).toBe('anr');
     expect(SPAN.HTTP_REQUEST).toBe('http.request');
+  });
+  it('keeps app_unclean_exit out of the error-class span set', () => {
+    // Membership here means "bypasses sampling as an error" and is what the
+    // backend's crash tables select on. A tab close is neither.
+    expect(ERROR_CLASS_SPANS.has(SPAN.APP_CRASH)).toBe(true);
+    expect(ERROR_CLASS_SPANS.has(SPAN.APP_UNCLEAN_EXIT)).toBe(false);
+    expect(ERROR_CLASS_SPANS.has(SPAN.USER_FRUSTRATION)).toBe(false);
   });
   it('keeps the breadcrumb type tags parity', () => {
     expect(BREADCRUMB_TYPE.TAP).toBe('tap');

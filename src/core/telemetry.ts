@@ -63,6 +63,9 @@ export function emitScoutConfigLog(scout: Scout): void {
   attrs['scout.config.has_custom_headers'] =
     !!cfg['headers'] && Object.keys(cfg['headers'] as object).length > 0;
   attrs['scout.config.track_resources'] = !!cfg['enableNetworkTracking'];
+  attrs['scout.config.third_party_resources'] = String(
+    cfg['thirdPartyResources'] ?? 'sanitized',
+  );
   attrs['scout.config.track_long_task'] = !!cfg['enableLongTaskDetection'];
   attrs['scout.config.track_user_interactions'] = !!cfg['enableAutoTapTracking'];
   attrs['scout.config.track_frustrations'] = !!cfg['enableAutoTapTracking'];

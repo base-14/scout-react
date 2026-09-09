@@ -5,6 +5,8 @@ import {
   type Tracer,
   type Meter,
   type Span,
+  type Histogram,
+  type UpDownCounter,
   SpanStatusCode,
 } from '@opentelemetry/api';
 import { logs, type Logger as OtelLogger } from '@opentelemetry/api-logs';
@@ -106,6 +108,10 @@ function extractErrorCauses(err: unknown): Array<{
   return out;
 }
 export class Scout {
+  // Instruments are cached rather than re-created per record; the meter
+  // dedupes by name, but only after building and matching a descriptor.
+  private _histograms = new Map<string, Histogram>();
+  private _gauges = new Map<string, UpDownCounter>();
   private _config: ResolvedConfig;
   private platform: PlatformAdapter;
   private tracer: Tracer;
@@ -303,6 +309,28 @@ export class Scout {
     }
     const anon = this._anonymousId;
     if (anon) attrs[ATTR.USER_ANONYMOUS_ID] = anon;
+    return attrs;
+  }
+  /**
+   * The subset of `commonAttributes()` that is safe as a metric dimension.
+   *
+   * Metric attributes are not span attributes. `otel_metrics_histogram` is
+   * ORDER BY (ServiceName, MetricName, Attributes, TimeUnix), so every distinct
+   * combination is its own time series, kept longer than traces and far harder
+   * to delete selectively. That rules out `user.id` and the caller-supplied
+   * `user.*` / runtime / session attribute bags, which are unbounded and, in
+   * `user.id`'s case, routinely an email address.
+   *
+   * `session.id` stays: it is bounded per session and dashboards filter on it.
+   */
+  metricAttributes(): Attributes {
+    const attrs: Attributes = {
+      [ATTR.SESSION_TYPE]: 'user',
+      [ATTR.SESSION_SAMPLE_RATE]: String(this.session.configuredSampleRate),
+    };
+    const sid = this.session.sessionId;
+    if (sid) attrs[ATTR.SESSION_ID] = sid;
+    if (this._currentScreen) attrs[ATTR.SCREEN_NAME] = this._currentScreen;
     return attrs;
   }
   private _anonymousId: string | null = null;
@@ -676,9 +704,15 @@ export class Scout {
       switch (spanName) {
         case SPAN.USER_INTERACTION:
           this.viewCounters.action?.add(1, dims);
-          if (attributes['action.frustration.type'] != null) {
+          if (attributes[ATTR.USER_INTERACTION_FRUSTRATION_TYPE] != null) {
             this.viewCounters.frustration?.add(1, dims);
           }
+          break;
+        // A frustration describes an interaction that was already counted;
+        // counting it again is what inflated view.action.count by one for
+        // every frustrated click.
+        case SPAN.USER_FRUSTRATION:
+          this.viewCounters.frustration?.add(1, dims);
           break;
         case SPAN.ERROR:
           this.viewCounters.error?.add(1, dims);
@@ -727,12 +761,16 @@ export class Scout {
     if (!this.session.isSampled) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
-      ...this.commonAttributes(),
+      ...this.metricAttributes(),
       value,
     });
     if (!filtered) return;
     try {
-      const histogram = this.meter.createHistogram(name);
+      let histogram = this._histograms.get(name);
+      if (!histogram) {
+        histogram = this.meter.createHistogram(name);
+        this._histograms.set(name, histogram);
+      }
       const recordAttrs = { ...filtered.attributes };
       delete recordAttrs.value;
       histogram.record(value, toOtelAttrs(recordAttrs));
@@ -744,12 +782,16 @@ export class Scout {
     if (!this.session.isSampled) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
-      ...this.commonAttributes(),
+      ...this.metricAttributes(),
       value,
     });
     if (!filtered) return;
     try {
-      const gauge = this.meter.createUpDownCounter(name);
+      let gauge = this._gauges.get(name);
+      if (!gauge) {
+        gauge = this.meter.createUpDownCounter(name);
+        this._gauges.set(name, gauge);
+      }
       const recordAttrs = { ...filtered.attributes };
       delete recordAttrs.value;
       gauge.add(value, toOtelAttrs(recordAttrs));

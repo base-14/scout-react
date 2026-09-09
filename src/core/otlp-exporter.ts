@@ -8,7 +8,7 @@ import {
   AggregationTemporality,
   AggregationType,
   type AggregationOption,
-  type InstrumentType,
+  InstrumentType,
   type PushMetricExporter,
   type ResourceMetrics,
 } from '@opentelemetry/sdk-metrics';
@@ -170,10 +170,15 @@ export function createOtlpMetricExporter(opts: OtlpExporterOptions): PushMetricE
   );
   return {
     export: (metrics, resultCallback) => doExport(metrics, resultCallback),
-    // Cumulative is what OTLPMetricExporter defaults to; anything else
-    // would silently change what the backend stores.
-    selectAggregationTemporality: (_instrumentType: InstrumentType) =>
-      AggregationTemporality.CUMULATIVE,
+    // Counters stay cumulative, which is what OTLPMetricExporter defaults to.
+    // Histograms are delta: the vitals recorded into them fire once per page
+    // load, and under cumulative temporality the SDK re-exported that same
+    // count=1 point every export interval for the life of the page — roughly
+    // 180 rows for 3 real measurements in a 30-minute session.
+    selectAggregationTemporality: (instrumentType: InstrumentType) =>
+      instrumentType === InstrumentType.HISTOGRAM
+        ? AggregationTemporality.DELTA
+        : AggregationTemporality.CUMULATIVE,
     selectAggregation: (_instrumentType: InstrumentType) => DEFAULT_AGGREGATION,
     forceFlush: async () => {},
     shutdown: async () => {

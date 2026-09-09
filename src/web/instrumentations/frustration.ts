@@ -2,6 +2,9 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import type { Attributes } from '../../core/types';
+import { lastInteractionFor } from './interaction-registry';
+/** How long after a click its `user_interaction` span is still the same gesture. */
+const CORRELATION_WINDOW_MS = 1000;
 export function installFrustrationTracker(scout: Scout): () => void {
   if (typeof document === 'undefined') return () => {};
   type ClickRow = {
@@ -14,9 +17,12 @@ export function installFrustrationTracker(scout: Scout): () => void {
     row: ClickRow;
     attrs: Attributes;
     mutated: boolean;
+    reported: boolean;
     timer: ReturnType<typeof setTimeout>;
   }> = [];
-  let lastErrorAt = 0;
+  // Not 0: `performance.now()` is also near 0 for the first moments of a page,
+  // so a 0 sentinel made every click in the first 100ms an `error_click`.
+  let lastErrorAt = Number.NEGATIVE_INFINITY;
   let mutObserver: MutationObserver | null = null;
   try {
     mutObserver = new MutationObserver(() => {
@@ -64,7 +70,15 @@ export function installFrustrationTracker(scout: Scout): () => void {
       const sameTarget = recent.filter((r) => r.selector === selector);
       const isRage = sameTarget.length >= 3;
       const rect = (target as HTMLElement).getBoundingClientRect?.();
+      const origin = lastInteractionFor(target, CORRELATION_WINDOW_MS);
       const baseAttrs: Attributes = {
+        ...(origin
+          ? {
+              [ATTR.USER_INTERACTION_ID]: origin.id,
+              [ATTR.USER_INTERACTION_TARGET]: origin.description,
+              [ATTR.USER_INTERACTION_TARGET_TYPE]: origin.targetType,
+            }
+          : {}),
         [ATTR.USER_INTERACTION_TYPE]: 'click',
         [ATTR.USER_INTERACTION_TARGET_SELECTOR]: selector,
         [ATTR.USER_INTERACTION_TARGET_X]: Math.round(e.clientX),
@@ -85,7 +99,13 @@ export function installFrustrationTracker(scout: Scout): () => void {
           Math.abs(lastErrorAt - row.t) < 100;
         if (erroredNearby) frustrations.push('error_click');
         if (frustrations.length > 0) {
-          scout.emitSpan(SPAN.USER_INTERACTION, {
+          // A rage episode IS a run of dead clicks on the same target. Claim
+          // every click that made it up, so one episode reports once instead
+          // of once per click in the run.
+          for (const p of pending) {
+            if (p.row.selector === selector) p.reported = true;
+          }
+          scout.emitSpan(SPAN.USER_FRUSTRATION, {
             ...baseAttrs,
             [ATTR.USER_INTERACTION_FRUSTRATION_TYPE]: frustrations.join(','),
           });
@@ -95,11 +115,15 @@ export function installFrustrationTracker(scout: Scout): () => void {
         row,
         attrs: baseAttrs,
         mutated: false,
+        reported: false,
         timer: setTimeout(() => {
           const idx = pending.indexOf(entry);
           if (idx >= 0) pending.splice(idx, 1);
-          if (!entry.mutated) {
-            scout.emitSpan(SPAN.USER_INTERACTION, {
+          // A click already reported as rage or error is not additionally a
+          // dead click; the two timers are independent and would otherwise
+          // both fire for the same gesture.
+          if (!entry.mutated && !entry.reported) {
+            scout.emitSpan(SPAN.USER_FRUSTRATION, {
               ...entry.attrs,
               [ATTR.USER_INTERACTION_FRUSTRATION_TYPE]: 'dead_click',
             });
