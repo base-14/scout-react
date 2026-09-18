@@ -171,7 +171,7 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | `interactionEvents` | `['click','change','submit','input']` | Web only. Which DOM events auto-tap tracking listens to; the value lands on the span as `user_interaction.type`. See below. |
 | `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. |
 | `enableLifecycleTracking` | `true` | App `foreground`/`background`/`paused`/`resumed`. Emits `app_paused` / `app_resumed` spans + `view.in_foreground_periods_json` on screen_view. |
-| `enableStartupTracking` | `true` | Cold/warm/hot start timing. Emits `app_startup` span. |
+| `enableStartupTracking` | `true` | Cold/warm start timing. Emits `app_startup` spans with `app_startup.type` (`cold` \| `warm`), `app_startup.duration` (seconds) and `app_startup.duration_ms` (milliseconds). Native cold start is measured from the OS process start; web cold start from navigation start to `loadEventEnd`. |
 | `enableConnectivityTracking` | `true` | Network type changes (`wifi` → `cellular`), connection quality. |
 | `enablePerformanceMetrics` | `true` | Memory and CPU samples. |
 | `enableLongTaskDetection` | `true` | JS long tasks > `longTaskThresholdMs`. Emits `long_task` span. |

@@ -21,6 +21,7 @@ describe('attribute / span / metric name contract', () => {
     expect(ATTR.USER_INTERACTION_TARGET).toBe('user_interaction.target');
     expect(ATTR.APP_STARTUP_TYPE).toBe('app_startup.type');
     expect(ATTR.APP_STARTUP_DURATION).toBe('app_startup.duration');
+    expect(ATTR.APP_STARTUP_DURATION_MS).toBe('app_startup.duration_ms');
     expect(ATTR.LONG_TASK_DURATION).toBe('long_task.duration');
     expect(ATTR.ANR_DURATION_MS).toBe('anr.duration_ms');
     expect(ATTR.ANR_THRESHOLD_MS).toBe('anr.threshold_ms');

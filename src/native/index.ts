@@ -314,12 +314,13 @@ export const Scout = {
       nativeStartMs !== null
         ? (Date.now() - nativeStartMs) / 1000
         : core.timeSinceAppStartMs() / 1000;
+    const fbcMs = Math.round(coldDurationSec * 1000);
     core.emitSpan(SPAN.APP_STARTUP, {
       [ATTR.APP_STARTUP_TYPE]: 'cold',
       [ATTR.APP_STARTUP_DURATION]: coldDurationSec,
+      [ATTR.APP_STARTUP_DURATION_MS]: fbcMs,
       ...core.commonAttributes(),
     });
-    const fbcMs = Math.round(coldDurationSec * 1000);
     core.emitSpan(SPAN.APP_VITAL, {
       [ATTR.VITAL_NAME]: 'fbc',
       [ATTR.VITAL_TYPE]: 'startup',

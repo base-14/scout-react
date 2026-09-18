@@ -55,6 +55,7 @@ export function installNativeLifecycleTracker(
             scout.emitSpan(SPAN.APP_STARTUP, {
               [ATTR.APP_STARTUP_TYPE]: 'warm',
               [ATTR.APP_STARTUP_DURATION]: durationMs / 1000,
+              [ATTR.APP_STARTUP_DURATION_MS]: Math.round(durationMs),
               ...scout.commonAttributes(),
             });
           } catch {}
