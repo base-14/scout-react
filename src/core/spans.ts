@@ -18,6 +18,11 @@ export const SPAN = {
    *  crash and must not depress crash-free rate. */
   APP_UNCLEAN_EXIT: 'app_unclean_exit',
   NATIVE_CRASH: 'native_crash',
+  /** A process death that is NOT a crash but worth seeing: Android
+   *  ApplicationExitInfo REASON_LOW_MEMORY (the OS reclaiming a cached
+   *  background process). Play Console and Crashlytics don't count it, and
+   *  neither does any crash-free rate; it only shows in session timelines. */
+  APP_EXIT: 'app_exit',
   ERROR: 'error',
   LONG_TASK: 'long_task',
   FROZEN_FRAME: 'frozen_frame',

@@ -446,16 +446,30 @@ private object ScoutExitInfoCollector {
     } catch (_: Throwable) {
       return
     }
+    // First launch with no watermark (fresh install, or an upgrade from an
+    // SDK that kept none): the OS history predates this SDK. Nothing in it
+    // can be attributed to a session we know about, and dumping up to 50 old
+    // deaths into the session that just started made it look crashed. Record
+    // the watermark and report nothing.
+    if (lastTs == 0L) {
+      val newestSeen = infos.maxOfOrNull { it.timestamp } ?: 0L
+      if (newestSeen > 0L) {
+        prefs.edit().putLong(KEY_LAST_TIMESTAMP, newestSeen).apply()
+      }
+      return
+    }
     var newest = lastTs
     for (info in infos) {
       if (info.timestamp <= lastTs) continue
       // The watermark advances over every record, benign ones included, so a
       // dropped exit is never re-examined on the next launch.
       if (info.timestamp > newest) newest = info.timestamp
-      val crashType = ScoutExitInfoClassifier.crashTypeFor(reasonName(info.reason))
-        ?: continue
+      val reason = reasonName(info.reason)
+      val crashType = ScoutExitInfoClassifier.crashTypeFor(reason)
+      val exitReason = if (crashType == null) ScoutExitInfoClassifier.exitReasonFor(reason) else null
+      if (crashType == null && exitReason == null) continue
       try {
-        writeReport(dir, info, crashType)
+        writeReport(dir, info, crashType ?: exitReason!!, isExit = crashType == null)
       } catch (_: Throwable) {
 
       }
@@ -465,8 +479,16 @@ private object ScoutExitInfoCollector {
     }
   }
 
-  private fun writeReport(dir: File, info: ApplicationExitInfo, crashType: String) {
+  private fun writeReport(
+    dir: File,
+    info: ApplicationExitInfo,
+    crashType: String,
+    isExit: Boolean = false,
+  ) {
     val obj = JSONObject().apply {
+      // Same `crash.*` shape for both; the JS side renames to `exit.*` and
+      // emits `app_exit` when the span marker says so.
+      if (isExit) put(ScoutExitInfoClassifier.SPAN_KEY, ScoutExitInfoClassifier.APP_EXIT)
       put("crash.type", crashType)
       put("crash.source", ScoutExitInfoClassifier.SOURCE)
       put("crash.os_reason_code", info.reason)

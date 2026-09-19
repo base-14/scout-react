@@ -22,11 +22,11 @@ class ExitInfoFilterTest {
     "crash" to "jvm_crash",
     "crash_native" to "native_crash",
     "anr" to "anr",
-    "low_memory" to "low_memory",
   )
 
-  /** Every other exit reason the OS can report. None may be emitted. */
+  /** Every other exit reason the OS can report. None may become a crash. */
   private val benign = listOf(
+    "low_memory", // OS reclaimed a cached process -- app_exit, not a crash
     "user_requested",
     "user_stopped",
     "exit_self",
@@ -66,14 +66,27 @@ class ExitInfoFilterTest {
   }
 
   @Test
-  fun `the crash-class set is exactly these four reasons`() {
+  fun `the crash-class set is exactly these three reasons`() {
     val classified = (crashClass.keys + benign).filter {
       ScoutExitInfoClassifier.isCrashClass(it)
     }
     assertEquals(
-      setOf("crash", "crash_native", "anr", "low_memory"),
+      setOf("crash", "crash_native", "anr"),
       classified.toSet(),
     )
+  }
+
+  @Test
+  fun `only low_memory is reported as an app_exit span`() {
+    assertEquals("low_memory", ScoutExitInfoClassifier.exitReasonFor("low_memory"))
+    for (reasonName in crashClass.keys + benign - "low_memory") {
+      assertNull(
+        "'$reasonName' must not produce an app_exit record",
+        ScoutExitInfoClassifier.exitReasonFor(reasonName),
+      )
+    }
+    assertEquals("app_exit", ScoutExitInfoClassifier.APP_EXIT)
+    assertEquals("scout.span", ScoutExitInfoClassifier.SPAN_KEY)
   }
 
   @Test

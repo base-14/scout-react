@@ -169,7 +169,7 @@ Every auto-instrumentation can be turned off independently. All default to `true
 |---|---|---|
 | `enableAutoTapTracking` | `true` | Web: the DOM events listed under `interactionEvents`. RN: `onPress` on Pressable/Touchable* (via babel plugin). Emits `user_interaction` spans. |
 | `interactionEvents` | `['click','change','submit','input']` | Web only. Which DOM events auto-tap tracking listens to; the value lands on the span as `user_interaction.type`. See below. |
-| `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. |
+| `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. Android low-memory kills (`REASON_LOW_MEMORY`, the OS reclaiming a cached process) are emitted as `app_exit` (`exit.reason: low_memory`) and never count as a crash; the first launch with no exit-info watermark records one and reports nothing. |
 | `enableLifecycleTracking` | `true` | App `foreground`/`background`/`paused`/`resumed`. Emits `app_paused` / `app_resumed` spans + `view.in_foreground_periods_json` on screen_view. |
 | `enableStartupTracking` | `true` | Cold/warm start timing. Emits `app_startup` spans with `app_startup.type` (`cold` \| `warm`), `app_startup.duration` (seconds) and `app_startup.duration_ms` (milliseconds). Native cold start is measured from the OS process start; web cold start from navigation start to `loadEventEnd`. |
 | `enableConnectivityTracking` | `true` | Network type changes (`wifi` → `cellular`), connection quality. |

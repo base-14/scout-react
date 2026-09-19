@@ -132,7 +132,7 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | ANR | `anr` | Web: worker watchdog. RN: timer-drift watchdog. |
 | HTTP (fetch + XHR) | `http.request` | Method, URL, status, duration, content-length |
 | Crash (OOM / force-kill) | `app_crash` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN) — survives unclean termination |
-| Native crash (RN) | `native_crash` on next launch | iOS: **KSCrash 2.5+** (mach exceptions, POSIX signals, C++, NSException, main-thread deadlock) + **MetricKit** (`MXCrashDiagnostic`, `MXHangDiagnostic`) on iOS 14+. Android: uncaught Java/Kotlin (`Thread.setDefaultUncaughtExceptionHandler`) + **NDK signal handler** for native crashes + **ApplicationExitInfo** (API 30+) for OS-recorded process deaths including OOM and ANR. Reports persisted to disk and emitted on next launch with full register / stack / binary-image dumps, prior breadcrumbs, and `crash.type` / `crash.reason` / `crash.stack_trace` |
+| Native crash (RN) | `native_crash` on next launch | iOS: **KSCrash 2.5+** (mach exceptions, POSIX signals, C++, NSException, main-thread deadlock) + **MetricKit** (`MXCrashDiagnostic`, `MXHangDiagnostic`) on iOS 14+. Android: uncaught Java/Kotlin (`Thread.setDefaultUncaughtExceptionHandler`) + **NDK signal handler** for native crashes + **ApplicationExitInfo** (API 30+) for OS-recorded process deaths including ANR (low-memory kills are emitted as `app_exit`, not as crashes). Reports persisted to disk and emitted on next launch with full register / stack / binary-image dumps, prior breadcrumbs, and `crash.type` / `crash.reason` / `crash.stack_trace` |
 | Logs | OTLP logs | `Scout.logDebug/Info/Warning/Error` and (opt-in) `console.*` capture |
 
 ### Web only

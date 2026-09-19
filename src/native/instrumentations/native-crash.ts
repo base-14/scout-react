@@ -2,6 +2,35 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { withSuppression } from '../soft-load';
+
+/**
+ * Key the Android exit-info collector sets on a pending report that must be
+ * emitted as `app_exit` (a low-memory reclaim) instead of `native_crash`.
+ * Mirrors `ScoutExitInfoClassifier.SPAN_KEY`.
+ */
+export const EXIT_SPAN_KEY = 'scout.span';
+
+/**
+ * `crash.*` → `exit.*` for the `app_exit` span shape: the OS reason name
+ * becomes `exit.reason`, its description `exit.description`, every other
+ * `crash.<k>` keeps its key under the `exit.` prefix. Non-`crash.` keys pass
+ * through; an empty `error.stack_trace` (there never is one for an exit) is
+ * dropped.
+ */
+export function toAppExitAttributes(
+  attrs: Record<string, string | number | boolean>,
+): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === ATTR.ERROR_STACK_TRACE && v === '') continue;
+    if (k === ATTR.CRASH_TYPE) out['exit.reason'] = v;
+    else if (k === ATTR.CRASH_REASON) out['exit.description'] = v;
+    else if (k.startsWith('crash.')) out[`exit.${k.slice('crash.'.length)}`] = v;
+    else out[k] = v;
+  }
+  return out;
+}
+
 export async function installNativeCrashReader(scout: Scout): Promise<void> {
   let ScoutCrash: ScoutCrashApi | null = null;
   try {
@@ -74,7 +103,11 @@ export async function installNativeCrashReader(scout: Scout): Promise<void> {
         if (crashedSessionStart) {
           common[ATTR.SESSION_START_TIME] = crashedSessionStart;
         }
-        scout.emitSpan(SPAN.NATIVE_CRASH, { ...attrs, ...common });
+        if (report[EXIT_SPAN_KEY] === SPAN.APP_EXIT) {
+          scout.emitSpan(SPAN.APP_EXIT, { ...toAppExitAttributes(attrs), ...common });
+        } else {
+          scout.emitSpan(SPAN.NATIVE_CRASH, { ...attrs, ...common });
+        }
       } catch {}
     }
     await ScoutCrash.clearPendingCrashes();
