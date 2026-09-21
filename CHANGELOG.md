@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-09-19
+
+### Changed
+
+- **Android low-memory kills are no longer crashes.** `ApplicationExitInfo`
+  `REASON_LOW_MEMORY` (the OS reclaiming a cached background process) was
+  written as a `native_crash` report with `crash.type: low_memory`. Play
+  Console and Crashlytics don't count it, and on aggressive OEMs it outnumbers
+  real crashes several times over, dragging crash-free rates far below the
+  store's. It is now an `app_exit` span (`exit.reason: low_memory`,
+  `exit.description`, `exit.importance`, `exit.pss_kb`, …) that never counts
+  as a crash. Crash counts will drop; re-baseline any alert on `native_crash`.
+  Parity with scout-flutter 0.3.0.
+- **First launch with no exit-info watermark reports nothing.** Fresh installs
+  used to drain the OS's exit history (up to 50 records, days old) into the
+  session that had just started. The watermark is now recorded and the backlog
+  skipped.
+
+### Added
+
+- `SPAN.APP_EXIT` (`app_exit`) and the `scout.span` marker the Android
+  collector puts on a pending report to route it there.
+
 ## [0.1.18] - 2026-09-18
 
 ### Added
