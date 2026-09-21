@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-09-19
+
+### Changed
+
+- **Android low-memory kills are no longer crashes.** `ApplicationExitInfo`
+  `REASON_LOW_MEMORY` (the OS reclaiming a cached background process) was
+  written as a `native_crash` report with `crash.type: low_memory`. Play
+  Console and Crashlytics don't count it, and on aggressive OEMs it outnumbers
+  real crashes several times over, dragging crash-free rates far below the
+  store's. It is now an `app_exit` span (`exit.reason: low_memory`,
+  `exit.description`, `exit.importance`, `exit.pss_kb`, …) that never counts
+  as a crash. Crash counts will drop; re-baseline any alert on `native_crash`.
+  Parity with scout-flutter 0.3.0.
+- **First launch with no exit-info watermark reports nothing.** Fresh installs
+  used to drain the OS's exit history (up to 50 records, days old) into the
+  session that had just started. The watermark is now recorded and the backlog
+  skipped.
+
+### Added
+
+- `SPAN.APP_EXIT` (`app_exit`) and the `scout.span` marker the Android
+  collector puts on a pending report to route it there.
+
+## [0.1.18] - 2026-09-18
+
+### Added
+
+- **`app_startup.duration_ms`** on every `app_startup` span (native cold and
+  warm, web cold and bfcache warm), next to the seconds-valued
+  `app_startup.duration`. The unsuffixed key gave no unit and produced the same
+  1000x display bug `anr.duration` did (fixed in 0.1.17 by renaming). Unlike
+  ANR, the seconds key is *kept*: RUM plugins before 0.1.34 read only
+  `app_startup.duration`, so dropping it would blank their startup panels.
+  Backends coalesce `app_startup.duration_ms` over `app_startup.duration * 1000`.
+
+### Fixed
+
+- `docs/configuration.md` claimed `enableStartupTracking` measured a "hot" start
+  and the 0.1.8 changelog entry named attribute keys that were never emitted.
+
 ## [0.1.17] - 2026-09-07
 
 Eight data-quality defects found validating browser RUM against live data. Four
@@ -634,8 +674,10 @@ slows trace/log export from 5s to 30s. All of it is opt-in-able — see below.
   the cold-start duration is measured from the OS process start, not from
   `Scout.initialize`. On background-to-active transitions, a `warm`
   `app_startup` span is emitted with duration measured to the next animation
-  frame. Both carry `app.startup.type` (`cold` | `warm`) and
-  `app.startup.duration_seconds`.
+  frame. Both carry `app_startup.type` (`cold` | `warm`) and
+  `app_startup.duration` (seconds). *(Corrected 2026-09-18: this entry
+  originally named the keys `app.startup.type` / `app.startup.duration_seconds`,
+  which were never what the SDK emitted.)*
 
 ## [0.1.6] - 2026-05-22
 

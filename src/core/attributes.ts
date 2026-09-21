@@ -82,6 +82,10 @@ export const ATTR = {
   DISPLAY_SCROLL_MAX_SCROLL_HEIGHT_TIME_MS: 'display.scroll.max_scroll_height_time_ms',
   APP_STARTUP_TYPE: 'app_startup.type',
   APP_STARTUP_DURATION: 'app_startup.duration',
+  /** Milliseconds. Pairs with the seconds-valued `app_startup.duration`
+   *  the way `anr.duration_ms` replaced `anr.duration`; readers coalesce
+   *  this over the legacy key while both exist. */
+  APP_STARTUP_DURATION_MS: 'app_startup.duration_ms',
   APP_STARTUP_METRIC: 'app_startup.metric',
   APP_STARTUP_IS_PREWARMED: 'app_startup.is_prewarmed',
   APP_STARTUP_HAS_SAVED_INSTANCE_STATE_BUNDLE:

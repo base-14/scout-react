@@ -29,6 +29,7 @@ export function installStartupTracker(scout: Scout): () => void {
       scout.emitSpan(SPAN.APP_STARTUP, {
         [ATTR.APP_STARTUP_TYPE]: 'cold',
         [ATTR.APP_STARTUP_DURATION]: duration,
+        [ATTR.APP_STARTUP_DURATION_MS]: Math.round(duration * 1000),
         [ATTR.BROWSER_NAV_DOM_COMPLETE_MS]: nav.domComplete,
         [ATTR.BROWSER_NAV_DOM_CONTENT_LOADED_MS]: nav.domContentLoadedEventEnd,
         [ATTR.BROWSER_NAV_DOM_INTERACTIVE_MS]: nav.domInteractive,
@@ -52,6 +53,7 @@ export function installStartupTracker(scout: Scout): () => void {
     scout.emitSpan(SPAN.APP_STARTUP, {
       [ATTR.APP_STARTUP_TYPE]: 'warm',
       [ATTR.APP_STARTUP_DURATION]: 0,
+      [ATTR.APP_STARTUP_DURATION_MS]: 0,
       ...scout.commonAttributes(),
     });
     scout.addBreadcrumb(BREADCRUMB_TYPE.STARTUP, 'warm start (bfcache)');
