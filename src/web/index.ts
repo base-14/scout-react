@@ -199,7 +199,11 @@ export const Scout = {
       _disposers.push(installFrustrationTracker(core));
     }
     if (resolved.enableLongTaskDetection) {
-      _disposers.push(installLongTaskTracker(core, resolved.longTaskThresholdMs));
+      _disposers.push(
+        installLongTaskTracker(core, resolved.longTaskThresholdMs, {
+          frozenFrameMaxMs: resolved.frozenFrameMaxMs,
+        }),
+      );
     }
     if (resolved.enableMemoryMetrics)
       _disposers.push(

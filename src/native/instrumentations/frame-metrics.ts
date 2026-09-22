@@ -5,17 +5,49 @@ import type { Scout } from '../../core/scout';
 import type { Attributes } from '../../core/types';
 import { uuidv4 } from '../../core/uuid';
 import { getCurrentScreen } from './navigation';
+import { withSuppression } from '../soft-load';
 const FROZEN_FRAME_MS = 700;
+const DEFAULT_FROZEN_FRAME_MAX_MS = 10000;
 const SLOW_FRAME_MS = 16.67;
 const DEFAULT_REPORT_INTERVAL_MS = 60000;
+/** The slice of React Native's AppState this tracker needs; injectable for tests. */
+export interface AppStateLike {
+  currentState: string;
+  addEventListener(
+    type: 'change',
+    handler: (state: string) => void,
+  ): { remove?: () => void } | void;
+  removeEventListener?(type: 'change', handler: (state: string) => void): void;
+}
+export interface NativeFrameMetricsOptions {
+  /** Cap for `frozen_frame.duration`; longer gaps are reported at the cap, flagged. */
+  frozenFrameMaxMs?: number;
+  appState?: AppStateLike | null;
+}
+let RN: any = null;
+try {
+  RN = withSuppression(() => require('react-native'));
+} catch {}
 export function installNativeFrameMetricsTracker(
   scout: Scout,
   longTaskThresholdMs: number,
   reportIntervalMs: number = DEFAULT_REPORT_INTERVAL_MS,
+  opts: NativeFrameMetricsOptions = {},
 ): () => void {
   const raf: ((cb: (t: number) => void) => number) | undefined = (globalThis as any)
     .requestAnimationFrame;
   if (typeof raf !== 'function') return () => {};
+  const frozenFrameMaxMs = Math.max(
+    FROZEN_FRAME_MS,
+    opts.frozenFrameMaxMs ?? DEFAULT_FROZEN_FRAME_MAX_MS,
+  );
+  const AppState: AppStateLike | null =
+    opts.appState !== undefined ? opts.appState : (RN?.AppState ?? null);
+  // A frame gap that spans time in the background is the OS pausing the app,
+  // not the JS thread being blocked: rAF stops while backgrounded, so the
+  // first frame after resume used to arrive as one gap the length of the
+  // whole background stay and was reported as a frozen frame that long.
+  let foreground = AppState ? AppState.currentState !== 'background' : true;
   let lastTs = -1;
   let stopped = false;
   let droppedSinceLastReport = 0;
@@ -31,6 +63,13 @@ export function installNativeFrameMetricsTracker(
   let currentRoot: unknown = scout.rootSpan;
   const tick = (ts: number) => {
     if (stopped) return;
+    if (!foreground) {
+      // Do not measure across a background stay; the next foreground frame
+      // starts a fresh baseline.
+      lastTs = -1;
+      raf(tick);
+      return;
+    }
     if (lastTs >= 0) {
       const delta = ts - lastTs;
       frameCountWindow++;
@@ -72,15 +111,18 @@ export function installNativeFrameMetricsTracker(
             `Long task: ${Math.round(delta)}ms`,
           );
           if (delta >= FROZEN_FRAME_MS) {
-            frozenMsInWindow += delta;
+            const capped = delta > frozenFrameMaxMs;
+            const frozenMs = capped ? frozenFrameMaxMs : delta;
+            frozenMsInWindow += frozenMs;
             scout.emitSpan(SPAN.FROZEN_FRAME, {
-              [ATTR.FROZEN_FRAME_DURATION]: seconds,
+              [ATTR.FROZEN_FRAME_DURATION]: frozenMs / 1000,
+              ...(capped ? { [ATTR.FROZEN_FRAME_CAPPED]: true } : {}),
               ...(screen ? { [ATTR.SCREEN_NAME]: screen } : {}),
               ...scout.commonAttributes(),
             });
             scout.addBreadcrumb(
               BREADCRUMB_TYPE.FROZEN_FRAME,
-              `Frozen frame: ${Math.round(delta)}ms`,
+              `Frozen frame: ${Math.round(frozenMs)}ms`,
             );
           }
         }
@@ -137,8 +179,21 @@ export function installNativeFrameMetricsTracker(
     frozenMsInWindow = 0;
   }, reportIntervalMs);
   raf(tick);
+  const onAppState = (state: string) => {
+    foreground = state === 'active';
+    // Whatever gap the pause produced belongs to the pause, not to a frame.
+    lastTs = -1;
+  };
+  let sub: { remove?: () => void } | void;
+  try {
+    sub = AppState?.addEventListener('change', onAppState);
+  } catch {}
   return () => {
     stopped = true;
     clearInterval(reportTimer);
+    try {
+      if (sub && typeof sub.remove === 'function') sub.remove();
+      else AppState?.removeEventListener?.('change', onAppState);
+    } catch {}
   };
 }
