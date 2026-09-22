@@ -25,7 +25,7 @@ import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SCOPE_VERSION } from '../core/scope';
-import { WebPlatform } from './platform';
+import { WebPlatform, isEmbeddedWebView } from './platform';
 import { installTapTracker } from './instrumentations/tap';
 import { installErrorTracker } from './instrumentations/error';
 import { installLifecycleTracker } from './instrumentations/lifecycle';
@@ -68,7 +68,14 @@ let _traceGate: GatedSpanExporter<SpanExporter> | null = null;
 export const Scout = {
   async initialize(config: ScoutConfig): Promise<void> {
     if (_instance) return;
-    const resolved = resolveConfig(config);
+    const resolved = resolveConfig({
+      ...config,
+      // A host app closes its WebView without pagehide, so the session
+      // marker would report every routine close. Off there unless the
+      // integrator asks for it.
+      enableUncleanExitDetection:
+        config.enableUncleanExitDetection ?? !isEmbeddedWebView(),
+    });
     const endpoint = resolveEndpoint(resolved.endpoint, resolved.secure);
     const platform = new WebPlatform();
     const offline = buildOfflineWiring(platform, endpoint, resolved.offlineBuffer);
@@ -216,7 +223,7 @@ export const Scout = {
     }
     if (resolved.captureConsole) _disposers.push(installConsoleCapture(core));
     _disposers.push(installRouteTracker(core));
-    _disposers.push(installCrashDetector(core));
+    if (resolved.enableUncleanExitDetection) _disposers.push(installCrashDetector(core));
     _disposers.push(installScrollDepthTracker(core));
     _disposers.push(installPageStateTracker(core));
     if (resolved.enableErrorTracking) _disposers.push(installCspViolationTracker(core));

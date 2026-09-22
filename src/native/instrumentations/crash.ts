@@ -17,6 +17,17 @@ interface Marker {
   active: boolean;
   /** Wall-clock of the last time the app was known to be alive. */
   lastActiveAt?: string;
+  /**
+   * The writing session's own sampling decision; an unsampled session
+   * exported nothing else. Absent before 0.1.20 — treated as sampled once.
+   */
+  sampled?: boolean;
+  /**
+   * Last session id an `app_unclean_exit` was emitted for. A session resumed
+   * within `sessionTimeoutMinutes` keeps its id, so this stops one dead
+   * session being reported once per relaunch.
+   */
+  reportedSessionId?: string;
 }
 let RN: any = null;
 try {
@@ -24,11 +35,14 @@ try {
 } catch {}
 export async function installNativeCrashDetector(scout: Scout): Promise<() => void> {
   const platform = scout.platformAdapter;
+  let reportedSessionId: string | undefined;
   try {
     const raw = await platform.getItem(MARKER_KEY);
     if (raw) {
       const prev = JSON.parse(raw) as Marker;
-      if (prev.active) {
+      reportedSessionId = prev.reportedSessionId;
+      const alreadyReported = prev.reportedSessionId === prev.sessionId;
+      if (prev.active && prev.sampled !== false && !alreadyReported) {
         // The span describes the *crashed* session, so it must be attributed
         // to it — the common attributes carry the new session that started
         // when the app relaunched. Same rewrite native-crash.ts does for NDK
@@ -54,9 +68,11 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
             ...common,
           },
           // Reports on a *previous* session, so the current session's sample
-          // decision must not gate it. Not an error-class span, so no bypass.
+          // decision must not gate it; the dead session's own decision was
+          // applied above. Not an error-class span, so no other bypass.
           { forceSample: true },
         );
+        reportedSessionId = prev.sessionId;
       }
     }
   } catch {}
@@ -70,20 +86,27 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
           lastScreen: lastScreenFromBreadcrumbs(scout.breadcrumbsManager.list()),
           active,
           lastActiveAt: new Date().toISOString(),
+          sampled: scout.sessionManager.isSampled,
+          reportedSessionId,
         } satisfies Marker),
       );
     } catch {}
   };
-  await writeMarker(true);
+  const AppState = RN?.AppState;
+  // Android keeps JS timers running for a while after the app is backgrounded,
+  // so the heartbeat must write the *current* state, never a blanket `true`,
+  // or a background kill would be re-armed as an unclean exit.
+  let foreground = AppState ? AppState.currentState !== 'background' : true;
+  await writeMarker(foreground);
   // Refresh while foregrounded so a crash timestamp is close to the real
   // death time rather than to whenever the app last changed state.
   const heartbeat = setInterval(() => {
-    void writeMarker(true);
+    void writeMarker(foreground);
   }, HEARTBEAT_MS);
-  const AppState = RN?.AppState;
   if (!AppState) return () => clearInterval(heartbeat);
   const onChange = (state: string) => {
-    void writeMarker(state === 'active');
+    foreground = state === 'active';
+    void writeMarker(foreground);
   };
   const sub = AppState.addEventListener('change', onChange);
   return () => {

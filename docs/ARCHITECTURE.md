@@ -286,12 +286,12 @@ sequenceDiagram
     Offline->>Storage: writeAll(remaining)
 
     Note over App,Storage: --- unclean termination (OOM, tab kill) ---
-    Note over App: crash.ts wrote {active:true, sessionId, lastScreen} on init
+    Note over App: crash.ts wrote {active:true, sessionId, lastScreen, sampled} on init
     App->>Scout: initialize() (next launch)
     Scout->>Storage: getItem('scout.session-marker')
     Storage-->>Scout: {active:true, sessionId, lastScreen,…}
     Note over Scout: active=true ⇒ previous session never paused cleanly
-    Scout->>Scout: emitSpan('app_crash', {crash.type='unclean_termination', crash.last_screen, breadcrumbs:[…]})
+    Scout->>Scout: emitSpan('app_unclean_exit', {crash.type='unclean_termination', crash.last_screen, breadcrumbs:[…]})  — not a crash; skipped if the dead session was unsampled or already reported
 ```
 
 **Three independent durability layers:**
@@ -300,7 +300,7 @@ sequenceDiagram
 |---|---|---|
 | In-memory retry with full jitter | `src/core/retry-exporter.ts` | Automatic on retryable failures (408, 429, 5xx, network errors) |
 | On-disk offline buffer (FIFO per signal) | `src/core/offline-buffer.ts` + `offline-wiring.ts` | `Scout.initialize()`, `visibilitychange → visible`, `online` event, `AppState → active` |
-| Persistent crash marker | `src/web/instrumentations/crash.ts` | Detected on next `Scout.initialize()` — emits `app_crash` span if previous session had `active=true` |
+| Persistent session marker | `src/web/instrumentations/crash.ts` | Detected on next `Scout.initialize()` — emits one `app_unclean_exit` span if the previous session had `active=true`, was sampled, and was not already reported. Heartbeat writes the current visibility, so a hidden page is never re-armed. Gated by `enableUncleanExitDetection` (off by default in embedded WebViews) |
 
 **Native crash recovery (RN):** `src/native/instrumentations/native-crash.ts` reads reports persisted by the bundled `ScoutCrash` Expo module — KSCrash on iOS + uncaught-Java-handler + NDK signal handler + `ApplicationExitInfo` on Android. On next launch, it emits one `native_crash` span per report with full register / stack / binary-image dumps + breadcrumbs from the previous session, then deletes the reports.
 
@@ -342,7 +342,7 @@ Four rules that hold for every tracker:
 | Concern | Where | How |
 |---|---|---|
 | **Session lifecycle** | `src/core/session-manager.ts` | Persisted `{id, startedAt, lastActiveAt, sampled}`. 30-min idle → new session ID on resume. `sampled` decided once via `Math.random()*100 < rate`; sticky for the session. |
-| **Breadcrumbs** | `src/core/breadcrumb-manager.ts` | Ring buffer of 20 `{type, message, time}`, persisted on every push. Serialized JSON attached to every `error` and `app_crash` span. |
+| **Breadcrumbs** | `src/core/breadcrumb-manager.ts` | Ring buffer of 20 `{type, message, time}`, persisted on every push. Serialized JSON attached to every `error`, `app_unclean_exit` and `native_crash` span. |
 | **`beforeSend` filtering** | `src/core/before-send.ts` | Runs on every span/metric/log before export. Return `null` to drop, return a modified event to scrub PII. `type` and `name` are read-only — stripped from the result. |
 | **PlatformAdapter** | `src/core/platform.ts` + `src/{web,native}/platform.ts` | Six methods: `getItem/setItem/removeItem`, `collectResourceAttributes`, `getConnectionType`, `onConnectivityChange`. Core never imports DOM or RN. |
 | **Soft-loaded peer deps** | `src/native/soft-load.ts` | Wraps `require()` calls so Metro statically detects them, but missing peer deps don't crash and don't pollute the user's error handler. |

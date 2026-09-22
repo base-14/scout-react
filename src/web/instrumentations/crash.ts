@@ -24,6 +24,23 @@ interface Marker {
   serviceName?: string;
   serviceVersion?: string;
   environment?: string;
+  /**
+   * The writing session's own sampling decision. An unsampled session
+   * exported nothing else, so a lone exit span for it is noise that also
+   * escapes `sessionSampleRate`. Absent on markers written before 0.1.20,
+   * which are treated as sampled once.
+   */
+  sampled?: boolean;
+  /**
+   * The last session id an `app_unclean_exit` was emitted for. A session
+   * resumed within `sessionTimeoutMinutes` keeps its id, so without this a
+   * kill → reopen → kill sequence reported the same session once per reopen.
+   */
+  reportedSessionId?: string;
+}
+/** `document.visibilityState`, treating a document-less runtime as visible. */
+function isVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
 }
 export function installCrashDetector(scout: Scout): () => void {
   if (typeof localStorage === 'undefined') return () => {};
@@ -36,11 +53,14 @@ export function installCrashDetector(scout: Scout): () => void {
       localStorage.removeItem(LEGACY_MARKER_KEY);
     }
   } catch {}
+  let reportedSessionId: string | undefined;
   try {
     const raw = localStorage.getItem(MARKER_KEY);
     if (raw) {
       const prev = JSON.parse(raw) as Marker;
-      if (prev.active) {
+      reportedSessionId = prev.reportedSessionId;
+      const alreadyReported = prev.reportedSessionId === prev.sessionId;
+      if (prev.active && prev.sampled !== false && !alreadyReported) {
         // Attribute the span to the session that actually died; the common
         // attributes describe the new one this page load created.
         const common = scout.commonAttributes();
@@ -70,9 +90,10 @@ export function installCrashDetector(scout: Scout): () => void {
           },
           // This reports on a *previous* session; gating it on the current
           // session's sample decision would drop it for unrelated reasons.
-          // It is not an error-class span, so it has no other bypass.
+          // The dead session's own decision was applied above.
           { forceSample: true },
         );
+        reportedSessionId = prev.sessionId;
       }
     }
   } catch {}
@@ -89,20 +110,21 @@ export function installCrashDetector(scout: Scout): () => void {
         serviceName,
         serviceVersion,
         environment,
+        sampled: scout.sessionManager.isSampled,
+        reportedSessionId,
       };
       localStorage.setItem(MARKER_KEY, JSON.stringify(m));
     } catch {}
   };
-  writeMarker(true);
+  // A page can be created hidden (a WebView pre-warmed by its host); it is
+  // armed when it first becomes visible.
+  writeMarker(isVisible());
   const onPageHide = () => writeMarker(false);
   const onBeforeUnload = () => writeMarker(false);
-  const onVisibility = () => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      writeMarker(false);
-    } else {
-      writeMarker(true);
-    }
-  };
+  // Page Lifecycle `freeze`: the browser is about to suspend the page and may
+  // discard it without ever firing `pagehide`.
+  const onFreeze = () => writeMarker(false);
+  const onVisibility = () => writeMarker(isVisible());
   let lastScreen = getLastScreen();
   let ticksSinceWrite = 0;
   const tick = () => {
@@ -110,22 +132,29 @@ export function installCrashDetector(scout: Scout): () => void {
     ticksSinceWrite += 1;
     // Write on screen change, and otherwise once every ~10s to keep
     // `lastActiveAt` (the crash timestamp) current without hammering
-    // localStorage every 2s.
+    // localStorage every 2s. Never re-arm a hidden page: an embedded
+    // WebView keeps running timers after `visibilitychange: hidden`, and
+    // the host then destroys it without a `pagehide` — a routine close that
+    // used to be reported as an unclean exit on the next open.
     if (next !== lastScreen || ticksSinceWrite >= HEARTBEAT_TICKS) {
       lastScreen = next;
       ticksSinceWrite = 0;
-      writeMarker(true);
+      writeMarker(isVisible());
     }
   };
   const screenInterval = setInterval(tick, TICK_MS);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('beforeunload', onBeforeUnload);
   document.addEventListener('visibilitychange', onVisibility);
+  document.addEventListener('freeze', onFreeze);
+  document.addEventListener('resume', onVisibility);
   return () => {
     clearInterval(screenInterval);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('beforeunload', onBeforeUnload);
     document.removeEventListener('visibilitychange', onVisibility);
+    document.removeEventListener('freeze', onFreeze);
+    document.removeEventListener('resume', onVisibility);
   };
 }
 function getLastScreen(): string {
