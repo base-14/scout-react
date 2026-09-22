@@ -1,5 +1,25 @@
 import type { PlatformAdapter } from '../core/platform';
 import { ATTR } from '../core/attributes';
+/**
+ * Whether the page is hosted by a native app's WebView rather than a browser.
+ * Android's system WebView carries a `wv` token in its UA; an iOS WKWebView
+ * reports an iPhone/iPad UA with no `Safari/` product (every real iOS browser,
+ * Chrome and Firefox included, keeps that token). Heuristic on purpose — it
+ * only picks a default, and `enableUncleanExitDetection` overrides it.
+ */
+export function isEmbeddedWebView(userAgent?: string): boolean {
+  const ua = userAgent ?? (globalThis as any).navigator?.userAgent;
+  if (typeof ua !== 'string' || ua === '') return false;
+  if (/\bwv\b/.test(ua) && /Android/.test(ua)) return true;
+  if (
+    /\b(iPhone|iPad|iPod)\b/.test(ua) &&
+    /AppleWebKit/.test(ua) &&
+    !/Safari\//.test(ua)
+  ) {
+    return true;
+  }
+  return false;
+}
 export class WebPlatform implements PlatformAdapter {
   readonly name = 'web' as const;
   async getItem(key: string): Promise<string | null> {

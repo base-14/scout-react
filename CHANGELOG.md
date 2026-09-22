@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The web session marker no longer re-arms itself while the page is
+  hidden.** `visibilitychange: hidden` cleared the marker, but the 10 s
+  heartbeat wrote it back as active regardless of visibility. An embedded
+  WebView keeps running timers after the host pauses it and is then destroyed
+  without `pagehide`, so every routine close was reported as an
+  `app_unclean_exit` on the next open (snabbit saw ~8× more of them than
+  `app_startup`). The heartbeat now writes the current visibility, and the
+  Page Lifecycle `freeze` / `resume` events clear and re-arm it. The native
+  marker's heartbeat likewise writes the current `AppState`. (B14-2079)
+- **Unclean-exit reports follow the dead session's sampling decision.** The
+  marker now records whether its session was sampled, and an unsampled
+  session's exit is not reported: it exported nothing else, and the lone span
+  escaped `sessionSampleRate` for 100 % of sessions. (B14-2080)
+- **One report per terminated session.** A session resumed within
+  `sessionTimeoutMinutes` keeps its id, and the fresh marker named it again,
+  so kill → reopen → kill filed the same session once per reopen (up to 7
+  times in the field). The marker remembers the last session it reported.
+  (B14-2081)
+
+### Added
+
+- `enableUncleanExitDetection` config flag. Defaults to `true`, and on web to
+  `false` inside an embedded WebView (Android system WebView `wv` UA token, or
+  an iOS WKWebView UA with no `Safari/` product), where the host closes the
+  page without any unload signal. Pass it explicitly to override the
+  heuristic. Also reported in the `scout.config` log. (B14-2079)
+
 - **`web-vitals` no longer throws on Chrome < 92 WebViews.** web-vitals 5
   calls `Array.prototype.at()` while tracking CLS and INP; on an Android 8.1
   system WebView (Chrome 87) that is `TypeError: this.o.at is not a function`
