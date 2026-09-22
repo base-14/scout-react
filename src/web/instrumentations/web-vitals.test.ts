@@ -78,6 +78,32 @@ describe('installWebVitalsTracker', () => {
     return scout;
   }
 
+  it('skips CLS and INP where Array.prototype.at is missing (Chrome < 92)', async () => {
+    // web-vitals 5 calls `.at(-1)` in its layout-shift and interaction
+    // managers; on an Android 8.1 system WebView that threw a TypeError on
+    // every layout shift, which our own error tracker then filed as an
+    // application error (B14-2082).
+    const at = Array.prototype.at;
+    delete (Array.prototype as { at?: unknown }).at;
+    try {
+      await install();
+    } finally {
+      Array.prototype.at = at;
+    }
+    expect(registered['CLS']).toBeUndefined();
+    expect(registered['INP']).toBeUndefined();
+    expect(registered['LCP']).toHaveLength(1);
+    expect(registered['FCP']).toHaveLength(1);
+    expect(registered['TTFB']).toHaveLength(1);
+  });
+
+  it('registers every vital where Array.prototype.at exists', async () => {
+    await install();
+    for (const name of ['CLS', 'FCP', 'INP', 'LCP', 'TTFB']) {
+      expect(registered[name]).toHaveLength(1);
+    }
+  });
+
   it('emits a web_vital span when a metric settles', async () => {
     await install();
     fire('LCP', 2400);

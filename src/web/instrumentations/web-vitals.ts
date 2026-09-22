@@ -173,9 +173,15 @@ export function installWebVitalsTracker(scout: Scout): () => void {
   };
   if (!observersRegistered) {
     observersRegistered = true;
-    onCLS(send);
+    // web-vitals 5 calls `Array.prototype.at` while tracking CLS and INP
+    // sessions. Chrome < 92 (the Android 8.1 system WebView) has no `at`, so
+    // its observer callback threw a TypeError on every layout shift for the
+    // life of the page — filed by our own error tracker as an application
+    // error. Those two vitals are skipped there; the rest still report.
+    const hasArrayAt = typeof (Array.prototype as { at?: unknown }).at === 'function';
+    if (hasArrayAt) onCLS(send);
     onFCP(send);
-    onINP(send);
+    if (hasArrayAt) onINP(send);
     onLCP(send);
     onTTFB(send);
   }

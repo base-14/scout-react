@@ -11,6 +11,7 @@ import {
 } from '@opentelemetry/api';
 import { logs, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { ATTR } from './attributes';
+import { isSdkOriginStack } from './sdk-origin';
 import { SPAN, BREADCRUMB_TYPE, ERROR_CLASS_SPANS } from './spans';
 import { METRIC } from './metrics';
 import { applyBeforeSend } from './before-send';
@@ -121,6 +122,8 @@ export class Scout {
   private breadcrumbs: BreadcrumbManager;
   private user = new UserManager();
   private errorCounter: ReturnType<Meter['createCounter']> | null = null;
+  /** Fingerprints of SDK-internal failures already reported this page. */
+  private _sdkErrorFingerprints = new Set<string>();
   private viewCounters: {
     action?: ReturnType<Meter['createCounter']>;
     error?: ReturnType<Meter['createCounter']>;
@@ -507,6 +510,7 @@ export class Scout {
       [ATTR.ERROR_HANDLING]: handled ? 'handled' : 'unhandled',
       [ATTR.ERROR_SOURCE]: opts?.source ?? 'source',
       [ATTR.ERROR_SOURCE_TYPE]: detectSourceType(),
+      [ATTR.ERROR_ORIGIN]: 'app',
       [ATTR.ERROR_TIME_SINCE_APP_START_MS]: this.timeSinceAppStartMs(),
       [ATTR.BREADCRUMBS]: this.breadcrumbs.serialize(),
       ...this.commonAttributes(),
@@ -530,6 +534,16 @@ export class Scout {
   }
   reportUncaught(error: unknown): void {
     const { message, stack } = normalizeError(error);
+    const fingerprint = errorFingerprint('uncaught_error', message, stack);
+    // A failure inside our own bundle (web-vitals' `Array.prototype.at` on Chrome < 92,
+    // say) is not the application breaking: it is recorded so we can see it,
+    // but flagged, kept out of the error counters, and reported once per
+    // distinct failure — that observer re-threw on every layout shift.
+    const sdkOrigin = isSdkOriginStack(stack);
+    if (sdkOrigin) {
+      if (this._sdkErrorFingerprints.has(fingerprint)) return;
+      this._sdkErrorFingerprints.add(fingerprint);
+    }
     const truncated = !!(stack && stack.length > MAX_STACK_LEN);
     const attrs: Attributes = {
       [ATTR.ERROR_ID]: uuidv4(),
@@ -541,17 +555,19 @@ export class Scout {
       [ATTR.ERROR_HANDLING]: 'unhandled',
       [ATTR.ERROR_SOURCE]: 'source',
       [ATTR.ERROR_SOURCE_TYPE]: detectSourceType(),
+      [ATTR.ERROR_ORIGIN]: sdkOrigin ? 'sdk' : 'app',
       [ATTR.ERROR_TIME_SINCE_APP_START_MS]: this.timeSinceAppStartMs(),
       [ATTR.BREADCRUMBS]: this.breadcrumbs.serialize(),
       ...this.commonAttributes(),
     };
+    if (sdkOrigin) attrs[ATTR.ERROR_CATEGORY] = 'sdk_internal';
     const causes = extractErrorCauses(error);
     if (causes.length > 0) {
       attrs[ATTR.ERROR_CAUSES_JSON] = JSON.stringify(causes).slice(0, 4000);
     }
-    attrs[ATTR.ERROR_FINGERPRINT] = errorFingerprint('uncaught_error', message, stack);
+    attrs[ATTR.ERROR_FINGERPRINT] = fingerprint;
     this.emitSpan(SPAN.ERROR, attrs, { status: SpanStatusCode.ERROR });
-    this.errorCounter?.add(1, { handled: 'false' });
+    if (!sdkOrigin) this.errorCounter?.add(1, { handled: 'false' });
     this.breadcrumbs.add(
       BREADCRUMB_TYPE.ERROR,
       `uncaught_error: ${runtimeTypeOf(error)}`,
@@ -715,7 +731,10 @@ export class Scout {
           this.viewCounters.frustration?.add(1, dims);
           break;
         case SPAN.ERROR:
-          this.viewCounters.error?.add(1, dims);
+          // An SDK-internal failure is visible as a span but is not the
+          // view's error.
+          if (attributes[ATTR.ERROR_ORIGIN] !== 'sdk')
+            this.viewCounters.error?.add(1, dims);
           break;
         case SPAN.APP_CRASH:
         case SPAN.NATIVE_CRASH:

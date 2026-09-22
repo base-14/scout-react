@@ -400,6 +400,20 @@ collector; it needs no host-side relay code and loses nothing.
 
 ---
 
+## Browser support
+
+Web builds emit ES2020 syntax and are tested down to **Chrome / Android System
+WebView 87** (Android 8.1) and **Safari 14**. The SDK calls no prototype method
+newer than that floor — `make check-compat` fails the build if `dist/` does —
+and gates dependency features behind runtime checks: `web-vitals`' CLS and INP
+tracking needs `Array.prototype.at` (Chrome 92) and is skipped below it, while
+LCP, FCP and TTFB still report. No polyfills are shipped. An error thrown from
+inside the SDK bundle is recorded with `error.origin: sdk` /
+`error.category: sdk_internal`, once per distinct failure per page, and does not
+count towards `error.count`.
+
+---
+
 ## Out of scope (for now)
 
 | Signal | Why not |

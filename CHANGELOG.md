@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`web-vitals` no longer throws on Chrome < 92 WebViews.** web-vitals 5
+  calls `Array.prototype.at()` while tracking CLS and INP; on an Android 8.1
+  system WebView (Chrome 87) that is `TypeError: this.o.at is not a function`
+  on every layout shift, for the life of the page, filed by our own error
+  tracker as an application error. CLS and INP are now registered only where
+  `Array.prototype.at` exists; LCP, FCP and TTFB still report there. The
+  package ships no polyfill — `web-vitals` is a runtime dependency that your
+  bundler inlines next to the SDK, which is why the stack named a
+  `scout-<hash>.js` chunk. (B14-2082)
+- **Errors thrown inside the SDK bundle are no longer counted as application
+  errors.** An uncaught error whose top frame is in the SDK (or `web-vitals`)
+  carries `error.origin: sdk` and `error.category: sdk_internal`, is reported
+  once per distinct failure per page, and is excluded from `error.count`,
+  `view.error.count` and `error_click` frustration detection. Every other
+  error now carries `error.origin: app`. (B14-2082)
+- **One failing instrumentation can no longer abort `Scout.initialize()`.**
+  Each installer is mounted in its own guard; before, a synchronous throw left
+  the providers unregistered so `flush()` / `shutdown()` were no-ops and every
+  later instrumentation was skipped.
+
+### Added
+
+- Browser floor: web builds are checked against Chrome / Android System
+  WebView 87 and Safari 14. `make check-compat` (part of `make ci`) fails the
+  build when `dist/` calls a runtime API newer than that floor.
+
 ## [0.1.19] - 2026-09-19
 
 ### Changed
