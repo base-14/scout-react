@@ -222,15 +222,10 @@ export const Scout = {
       mount('installFrustrationTracker', () => installFrustrationTracker(core));
     }
     if (resolved.enableLongTaskDetection) {
-<<<<<<< HEAD
-      _disposers.push(
+      mount('installLongTaskTracker', () =>
         installLongTaskTracker(core, resolved.longTaskThresholdMs, {
           frozenFrameMaxMs: resolved.frozenFrameMaxMs,
         }),
-=======
-      mount('installLongTaskTracker', () =>
-        installLongTaskTracker(core, resolved.longTaskThresholdMs),
->>>>>>> origin/main
       );
     }
     if (resolved.enableMemoryMetrics)
