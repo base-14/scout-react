@@ -199,36 +199,60 @@ export const Scout = {
       window.addEventListener('online', onOnline);
       _disposers.push(() => window.removeEventListener('online', onOnline));
     }
-    if (resolved.enableErrorTracking) _disposers.push(installErrorTracker(core));
+    // One failing installer must not abort the rest of initialize(): a
+    // synchronous throw here used to leave `_providers` unset, so flush() and
+    // shutdown() became no-ops and every later instrumentation was skipped.
+    const mount = (label: string, install: () => () => void) => {
+      try {
+        _disposers.push(install());
+      } catch (e) {
+        if (resolved.debug) console.warn('[scout] failed to install', label, e);
+      }
+    };
+    if (resolved.enableErrorTracking)
+      mount('installErrorTracker', () => installErrorTracker(core));
     if (resolved.enableLifecycleTracking)
-      _disposers.push(installLifecycleTracker(core, () => Scout.flush()));
-    if (resolved.enableStartupTracking) _disposers.push(installStartupTracker(core));
+      mount('installLifecycleTracker', () =>
+        installLifecycleTracker(core, () => Scout.flush()),
+      );
+    if (resolved.enableStartupTracking)
+      mount('installStartupTracker', () => installStartupTracker(core));
     if (resolved.enableAutoTapTracking) {
-      _disposers.push(installTapTracker(core));
-      _disposers.push(installFrustrationTracker(core));
+      mount('installTapTracker', () => installTapTracker(core));
+      mount('installFrustrationTracker', () => installFrustrationTracker(core));
     }
     if (resolved.enableLongTaskDetection) {
-      _disposers.push(installLongTaskTracker(core, resolved.longTaskThresholdMs));
+      mount('installLongTaskTracker', () =>
+        installLongTaskTracker(core, resolved.longTaskThresholdMs),
+      );
     }
     if (resolved.enableMemoryMetrics)
-      _disposers.push(
+      mount('installMemoryTracker', () =>
         installMemoryTracker(core, resolved.vitalsCollectionIntervalSeconds * 1000),
       );
-    if (resolved.enableFrameMetrics) _disposers.push(installFrameMetricsTracker(core));
-    if (resolved.enableWebVitals) _disposers.push(installWebVitalsTracker(core));
-    if (resolved.enableBatteryTracking) _disposers.push(installBatteryTracker(core));
+    if (resolved.enableFrameMetrics)
+      mount('installFrameMetricsTracker', () => installFrameMetricsTracker(core));
+    if (resolved.enableWebVitals)
+      mount('installWebVitalsTracker', () => installWebVitalsTracker(core));
+    if (resolved.enableBatteryTracking)
+      mount('installBatteryTracker', () => installBatteryTracker(core));
     if (resolved.enableAnrDetection)
-      _disposers.push(installAnrDetector(core, resolved.anrThresholdMs));
+      mount('installAnrDetector', () =>
+        installAnrDetector(core, resolved.anrThresholdMs),
+      );
     if (resolved.enableNetworkTracking) {
-      _disposers.push(startPerformanceBuffer());
-      _disposers.push(installNetworkTracker(core));
+      mount('startPerformanceBuffer', () => startPerformanceBuffer());
+      mount('installNetworkTracker', () => installNetworkTracker(core));
     }
-    if (resolved.captureConsole) _disposers.push(installConsoleCapture(core));
-    _disposers.push(installRouteTracker(core));
-    if (resolved.enableUncleanExitDetection) _disposers.push(installCrashDetector(core));
-    _disposers.push(installScrollDepthTracker(core));
-    _disposers.push(installPageStateTracker(core));
-    if (resolved.enableErrorTracking) _disposers.push(installCspViolationTracker(core));
+    if (resolved.captureConsole)
+      mount('installConsoleCapture', () => installConsoleCapture(core));
+    mount('installRouteTracker', () => installRouteTracker(core));
+    if (resolved.enableUncleanExitDetection)
+      mount('installCrashDetector', () => installCrashDetector(core));
+    mount('installScrollDepthTracker', () => installScrollDepthTracker(core));
+    mount('installPageStateTracker', () => installPageStateTracker(core));
+    if (resolved.enableErrorTracking)
+      mount('installCspViolationTracker', () => installCspViolationTracker(core));
     try {
       emitScoutConfigLog(core);
     } catch {}

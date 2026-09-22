@@ -1,4 +1,5 @@
 import { ATTR } from '../../core/attributes';
+import { isSdkOriginStack } from '../../core/sdk-origin';
 import { SPAN } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import type { Attributes } from '../../core/types';
@@ -35,7 +36,13 @@ export function installFrustrationTracker(scout: Scout): () => void {
       characterData: true,
     });
   } catch {}
-  const onError = () => {
+  const onError = (event: Event) => {
+    // A failure inside the SDK bundle is not the app breaking under the
+    // user's click.
+    const err =
+      (event as ErrorEvent).error ?? (event as unknown as PromiseRejectionEvent).reason;
+    const stack = err && typeof err.stack === 'string' ? err.stack : undefined;
+    if (isSdkOriginStack(stack)) return;
     lastErrorAt = performance.now();
   };
   window.addEventListener('error', onError, true);

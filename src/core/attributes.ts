@@ -110,6 +110,8 @@ export const ATTR = {
   ERROR_SOURCE_TYPE: 'error.source_type',
   ERROR_CATEGORY: 'error.category',
   ERROR_FINGERPRINT: 'error.fingerprint',
+  /** `app` or `sdk` — whether the error came from application code or from inside the SDK bundle. */
+  ERROR_ORIGIN: 'error.origin',
   ERROR_CAUSES_JSON: 'error.causes_json',
   ERROR_WAS_TRUNCATED: 'error.was_truncated',
   ERROR_TIME_SINCE_APP_START_MS: 'error.time_since_app_start_ms',
