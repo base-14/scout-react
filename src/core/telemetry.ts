@@ -34,6 +34,7 @@ export function emitScoutConfigLog(scout: Scout): void {
     'enableMemoryMetrics',
     'enableCpuMetrics',
     'enableWebVitals',
+    'enableUncleanExitDetection',
     'enableBatteryTracking',
     'enableNetworkTracking',
     'enableConnectivityTracking',

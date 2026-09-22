@@ -53,6 +53,8 @@ describe('app_unclean_exit from the session marker', () => {
     disposers.splice(0).forEach((d) => d());
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    // Tests override the instance getter; drop it so jsdom's own applies again.
+    delete (document as { visibilityState?: unknown }).visibilityState;
   });
 
   function seedCrashedSession(marker: Record<string, unknown>, key: string = MARKER_KEY) {
@@ -229,6 +231,123 @@ describe('app_unclean_exit from the session marker', () => {
     expect(
       recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
     ).toBeDefined();
+  });
+
+  function setVisibility(state: 'visible' | 'hidden') {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => state,
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+  const marker = () => JSON.parse(storage.getItem(MARKER_KEY)!);
+
+  it('records the live session’s sampling decision in the marker', async () => {
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(marker().sampled).toBe(true);
+  });
+
+  it('records a sampled-out session as such', async () => {
+    const s = new Scout(
+      {
+        serviceName: 'test-svc',
+        endpoint: 'http://localhost:4318',
+        secure: false,
+        sessionSampleRate: 0,
+      },
+      memoryPlatform(),
+    );
+    await s.bootstrap();
+    disposers.push(installCrashDetector(s));
+    expect(marker().sampled).toBe(false);
+  });
+
+  it('skips a marker whose own session was sampled out', async () => {
+    // The dead session exported nothing else, so a lone exit span for it
+    // would be noise that also escapes sessionSampleRate (B14-2080).
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z', sampled: false });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeUndefined();
+  });
+
+  it('remembers which session it reported', async () => {
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(marker().reportedSessionId).toBe('dead-session');
+  });
+
+  it('reports a terminated session at most once across resumes', async () => {
+    // A session resumed inside sessionTimeoutMinutes keeps its id, so the
+    // marker for the resumed page names the session already reported. A
+    // second unclean exit of it must not file a second span (B14-2081).
+    seedCrashedSession({
+      lastActiveAt: '2026-01-01T00:05:00.000Z',
+      reportedSessionId: 'dead-session',
+    });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(
+      recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT),
+    ).toBeUndefined();
+    expect(marker().reportedSessionId).toBe('dead-session');
+  });
+
+  it('still reports a different session after one was already reported', async () => {
+    seedCrashedSession({
+      sessionId: 'next-dead-session',
+      lastActiveAt: '2026-01-01T00:05:00.000Z',
+      reportedSessionId: 'dead-session',
+    });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    const span = recorder.spans().find((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT);
+    expect(span!.attributes[ATTR.CRASH_PREVIOUS_SESSION_ID]).toBe('next-dead-session');
+    expect(marker().reportedSessionId).toBe('next-dead-session');
+  });
+
+  it('does not re-arm the marker on the heartbeat while the page is hidden', async () => {
+    // An embedded WebView keeps running timers after visibilitychange:hidden
+    // and is then destroyed without pagehide; a blanket active:true heartbeat
+    // turned every such close into an unclean exit (B14-2079).
+    const s = await makeScout();
+    vi.useFakeTimers();
+    disposers.push(installCrashDetector(s));
+    expect(marker().active).toBe(true);
+    setVisibility('hidden');
+    expect(marker().active).toBe(false);
+    vi.advanceTimersByTime(30_000);
+    expect(marker().active).toBe(false);
+    setVisibility('visible');
+    expect(marker().active).toBe(true);
+    vi.advanceTimersByTime(30_000);
+    expect(marker().active).toBe(true);
+  });
+
+  it('marks the page inactive on freeze and re-arms it on resume', async () => {
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    setVisibility('visible');
+    document.dispatchEvent(new Event('freeze'));
+    expect(marker().active).toBe(false);
+    document.dispatchEvent(new Event('resume'));
+    expect(marker().active).toBe(true);
+  });
+
+  it('starts inactive when the page is created hidden', async () => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    const s = await makeScout();
+    disposers.push(installCrashDetector(s));
+    expect(marker().active).toBe(false);
+    setVisibility('visible');
+    expect(marker().active).toBe(true);
   });
 
   it('records the live session’s own start time in the marker it writes', async () => {

@@ -46,6 +46,15 @@ export interface ScoutConfig {
   enableMemoryMetrics?: boolean;
   enableCpuMetrics?: boolean;
   enableWebVitals?: boolean;
+  /**
+   * Report a session that ended without `pagehide` / a clean background
+   * transition as an `app_unclean_exit` span on the next launch. Web
+   * defaults this to `false` inside an embedded WebView (Android system
+   * WebView, iOS WKWebView), where the host closes the page without any
+   * unload signal and every routine close would be reported; `true`
+   * everywhere else.
+   */
+  enableUncleanExitDetection?: boolean;
   maxTombstoneBytes?: number;
   enableBatteryTracking?: boolean;
   enableNetworkTracking?: boolean;
@@ -202,6 +211,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     enableCpuMetrics: config.enableCpuMetrics ?? false,
     maxTombstoneBytes: Math.max(4096, config.maxTombstoneBytes ?? 131072),
     enableWebVitals: config.enableWebVitals ?? true,
+    enableUncleanExitDetection: config.enableUncleanExitDetection ?? true,
     enableBatteryTracking: config.enableBatteryTracking ?? true,
     enableNetworkTracking: config.enableNetworkTracking ?? true,
     enableLogging: config.enableLogging ?? true,

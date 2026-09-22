@@ -25,7 +25,7 @@ import { buildOfflineWiring } from '../core/offline-wiring';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SCOPE_VERSION } from '../core/scope';
-import { WebPlatform } from './platform';
+import { WebPlatform, isEmbeddedWebView } from './platform';
 import { installTapTracker } from './instrumentations/tap';
 import { installErrorTracker } from './instrumentations/error';
 import { installLifecycleTracker } from './instrumentations/lifecycle';
@@ -68,6 +68,15 @@ let _traceGate: GatedSpanExporter<SpanExporter> | null = null;
 export const Scout = {
   async initialize(config: ScoutConfig): Promise<void> {
     if (_instance) return;
+    // A host app closes its WebView without pagehide, so the session marker
+    // would report every routine close. Off there unless the integrator asks
+    // for it. The effective config also feeds the core, so `Scout.instance
+    // .config` and the scout.config log report what actually ran.
+    config = {
+      ...config,
+      enableUncleanExitDetection:
+        config.enableUncleanExitDetection ?? !isEmbeddedWebView(),
+    };
     const resolved = resolveConfig(config);
     const endpoint = resolveEndpoint(resolved.endpoint, resolved.secure);
     const platform = new WebPlatform();
@@ -216,7 +225,7 @@ export const Scout = {
     }
     if (resolved.captureConsole) _disposers.push(installConsoleCapture(core));
     _disposers.push(installRouteTracker(core));
-    _disposers.push(installCrashDetector(core));
+    if (resolved.enableUncleanExitDetection) _disposers.push(installCrashDetector(core));
     _disposers.push(installScrollDepthTracker(core));
     _disposers.push(installPageStateTracker(core));
     if (resolved.enableErrorTracking) _disposers.push(installCspViolationTracker(core));
