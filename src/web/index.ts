@@ -68,14 +68,16 @@ let _traceGate: GatedSpanExporter<SpanExporter> | null = null;
 export const Scout = {
   async initialize(config: ScoutConfig): Promise<void> {
     if (_instance) return;
-    const resolved = resolveConfig({
+    // A host app closes its WebView without pagehide, so the session marker
+    // would report every routine close. Off there unless the integrator asks
+    // for it. The effective config also feeds the core, so `Scout.instance
+    // .config` and the scout.config log report what actually ran.
+    config = {
       ...config,
-      // A host app closes its WebView without pagehide, so the session
-      // marker would report every routine close. Off there unless the
-      // integrator asks for it.
       enableUncleanExitDetection:
         config.enableUncleanExitDetection ?? !isEmbeddedWebView(),
-    });
+    };
+    const resolved = resolveConfig(config);
     const endpoint = resolveEndpoint(resolved.endpoint, resolved.secure);
     const platform = new WebPlatform();
     const offline = buildOfflineWiring(platform, endpoint, resolved.offlineBuffer);

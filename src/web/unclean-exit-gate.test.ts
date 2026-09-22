@@ -74,8 +74,10 @@ describe('enableUncleanExitDetection gate', () => {
     // The host closes the WebView without pagehide, so every routine close
     // would otherwise be filed as an unclean exit on the next open.
     setUserAgent(ANDROID_WEBVIEW);
-    await initialize();
+    const Scout = await initialize();
     expect(storage.getItem(MARKER_KEY)).toBeNull();
+    // The core sees the same effective value, so the scout.config log is honest.
+    expect(Scout.instance?.config.enableUncleanExitDetection).toBe(false);
   });
 
   it('lets the integrator force detection on inside a WebView', async () => {
