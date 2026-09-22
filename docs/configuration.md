@@ -159,7 +159,7 @@ If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Andr
 |---|---|---|---|
 | `sessionTimeoutMinutes` | `number` | `30` | Inactivity timeout before a new `session.id` is minted. |
 | `sessionSampleRate` | `number (0-100)` | `1` | Percent of sessions sampled. Below `100`, full sessions are dropped (not individual events) so you keep coherent session traces. Errors bypass this gate by default — see `alwaysCaptureErrors`. |
-| `alwaysCaptureErrors` | `boolean` | `true` | When `true`, error- and crash-class spans (`error`, `native_crash`, `app_crash`, `anr`) and `ERROR`-severity logs bypass `sessionSampleRate` and are always exported. Set to `false` to subject errors to the same sampling decision as other telemetry. |
+| `alwaysCaptureErrors` | `boolean` | `true` | When `true`, error- and crash-class spans (`error`, `native_crash`, `app_crash`, `anr`) and `ERROR`-severity logs bypass `sessionSampleRate` and are always exported. Set to `false` to subject errors to the same sampling decision as other telemetry. `app_unclean_exit` is not crash-class: it is reported only when the session it describes was itself sampled. |
 
 ## Auto-instrumentation toggles
 
@@ -169,7 +169,7 @@ Every auto-instrumentation can be turned off independently. All default to `true
 |---|---|---|
 | `enableAutoTapTracking` | `true` | Web: the DOM events listed under `interactionEvents`. RN: `onPress` on Pressable/Touchable* (via babel plugin). Emits `user_interaction` spans. |
 | `interactionEvents` | `['click','change','submit','input']` | Web only. Which DOM events auto-tap tracking listens to; the value lands on the span as `user_interaction.type`. See below. |
-| `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. Android low-memory kills (`REASON_LOW_MEMORY`, the OS reclaiming a cached process) are emitted as `app_exit` (`exit.reason: low_memory`) and never count as a crash; the first launch with no exit-info watermark records one and reports nothing. |
+| `enableErrorTracking` | `true` | `window.onerror`, `unhandledrejection`, native crashes via KSCrash + NDK signal handler + MetricKit + ApplicationExitInfo. Emits `error`, `app_crash`, `native_crash` spans. Every `error` span carries `error.origin` (`app`, or `sdk` when the top stack frame is inside the SDK bundle or `web-vitals`); `sdk` errors also carry `error.category: sdk_internal`, are emitted once per distinct failure per page, and are excluded from `error.count` / `view.error.count` and from `error_click` detection. Android low-memory kills (`REASON_LOW_MEMORY`, the OS reclaiming a cached process) are emitted as `app_exit` (`exit.reason: low_memory`) and never count as a crash; the first launch with no exit-info watermark records one and reports nothing. |
 | `enableLifecycleTracking` | `true` | App `foreground`/`background`/`paused`/`resumed`. Emits `app_paused` / `app_resumed` spans + `view.in_foreground_periods_json` on screen_view. |
 | `enableStartupTracking` | `true` | Cold/warm start timing. Emits `app_startup` spans with `app_startup.type` (`cold` \| `warm`), `app_startup.duration` (seconds) and `app_startup.duration_ms` (milliseconds). Native cold start is measured from the OS process start; web cold start from navigation start to `loadEventEnd`. |
 | `enableConnectivityTracking` | `true` | Network type changes (`wifi` → `cellular`), connection quality. |
@@ -180,6 +180,7 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | `enableMemoryMetrics` | **`false`** | RN/web process memory sampling. Emits `*.memory.*` metrics. Opt-in. |
 | `enableCpuMetrics` | **`false`** | RN CPU usage sampling. Emits `react_native.cpu.usage`. Opt-in. |
 | `enableWebVitals` | `true` | Web: LCP, INP, CLS, FCP, TTFB. Emits `web_vital` spans. |
+| `enableUncleanExitDetection` | `true` (web: `false` inside an embedded WebView) | A persistent session marker that reports the previous session as `app_unclean_exit` when it ended without `pagehide` / a clean background transition. Not a crash: it never touches crash-free rate or `view.crash.count`. Web defaults it off when the UA is an Android system WebView (`wv` token) or an iOS WKWebView (no `Safari/` product), because the host closes the page without any unload signal; pass `true` or `false` to override the heuristic. One report per terminated session, and only for sessions that were sampled. |
 | `enableBatteryTracking` | `true` | RN: battery level + charging state on every span. |
 | `enableNetworkTracking` | `true` | Wraps `fetch` / `XMLHttpRequest`. Emits `http.request` spans + provider classification + GraphQL parse. |
 | `enableLogging` | `true` | Allows `Scout.log*()` calls to emit OTLP logs. |

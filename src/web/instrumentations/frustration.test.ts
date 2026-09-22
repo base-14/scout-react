@@ -59,6 +59,38 @@ describe('frustration tracker', () => {
 
   const named = (name: string) => recorder.spans().filter((s) => s.name === name);
 
+  const frustrationTypes = () =>
+    named(SPAN.USER_FRUSTRATION).map(
+      (s) => s.attributes[ATTR.USER_INTERACTION_FRUSTRATION_TYPE],
+    );
+  function raise(stack: string) {
+    const err = new Error('boom');
+    err.stack = stack;
+    window.dispatchEvent(new ErrorEvent('error', { error: err, message: 'boom' }));
+  }
+  const APP_STACK = `Error: boom
+    at onClick (https://expert-webapp.snabbit.com/assets/index-Ab12Cd34.js:4:1200)`;
+  const SDK_STACK = `TypeError: this.o.at is not a function
+    at e._processEntry (https://expert-webapp.snabbit.com/assets/scout-LfkEtGwo.js:1:24567)`;
+
+  it('marks a click followed by an application error as an error_click', async () => {
+    install();
+    clickOn(button);
+    raise(APP_STACK);
+    vi.advanceTimersByTime(DEAD_CLICK_WINDOW_MS + 10);
+    expect(frustrationTypes()).toContain('error_click');
+  });
+
+  it('does not blame a click for an error thrown inside the SDK bundle', async () => {
+    // web-vitals' `.at()` TypeError fired on every layout shift on old
+    // WebViews, so every click landed next to one (B14-2082).
+    install();
+    clickOn(button);
+    raise(SDK_STACK);
+    vi.advanceTimersByTime(DEAD_CLICK_WINDOW_MS + 10);
+    expect(frustrationTypes()).not.toContain('error_click');
+  });
+
   it('reports a dead click without emitting a second user_interaction', async () => {
     install();
     clickOn(button);

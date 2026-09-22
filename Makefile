@@ -1,5 +1,5 @@
 .PHONY: help install build typecheck test test-watch test-coverage test-android \
-        lint lint-fix fmt fmt-check check-exports clean audit ci all
+        lint lint-fix fmt fmt-check check-compat check-exports clean audit ci all
 
 NODE_BIN := node_modules/.bin
 
@@ -62,6 +62,9 @@ fmt-check: ## Verify src formatting
 # consumers' production builds silently, with no error to trace it back to.
 # Needs a per-module audit of top-level statements plus a bundled-app smoke
 # test before flipping — not a one-line change.
+check-compat: ## Fail if dist/ calls runtime APIs missing from Chrome / Android WebView 87
+	node scripts/check-dist-compat.mjs
+
 check-exports: ## Lint the published exports map + type resolution (publint + attw)
 	$(NODE_BIN)/publint
 	$(NODE_BIN)/attw --pack . --ignore-rules cjs-only-exports-default
@@ -76,6 +79,6 @@ clean: ## Remove build outputs (JS + Kotlin)
 	rm -rf dist coverage
 	rm -rf android/unit-tests/build android/unit-tests/.gradle android/unit-tests/.kotlin
 
-ci: fmt-check lint typecheck test build check-exports ## Mirror the CI pipeline locally
+ci: fmt-check lint typecheck test build check-compat check-exports ## Mirror the CI pipeline locally
 
 all: install audit ci ## Install + audit + ci

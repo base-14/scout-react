@@ -131,7 +131,7 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | Frozen frames | `frozen_frame` | Long task ≥ 700ms; background / suspended time excluded, capped at `frozenFrameMaxMs` |
 | ANR | `anr` | Web: worker watchdog. RN: timer-drift watchdog. |
 | HTTP (fetch + XHR) | `http.request` | Method, URL, status, duration, content-length |
-| Crash (OOM / force-kill) | `app_crash` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN) — survives unclean termination |
+| Unclean exit (OOM / force-kill / tab discard) | `app_unclean_exit` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN). Not a crash — `pagehide` also fails to fire on ordinary closes, so it never touches crash-free rate. Off by default inside embedded WebViews (`enableUncleanExitDetection`) |
 | Native crash (RN) | `native_crash` on next launch | iOS: **KSCrash 2.5+** (mach exceptions, POSIX signals, C++, NSException, main-thread deadlock) + **MetricKit** (`MXCrashDiagnostic`, `MXHangDiagnostic`) on iOS 14+. Android: uncaught Java/Kotlin (`Thread.setDefaultUncaughtExceptionHandler`) + **NDK signal handler** for native crashes + **ApplicationExitInfo** (API 30+) for OS-recorded process deaths including ANR (low-memory kills are emitted as `app_exit`, not as crashes). Reports persisted to disk and emitted on next launch with full register / stack / binary-image dumps, prior breadcrumbs, and `crash.type` / `crash.reason` / `crash.stack_trace` |
 | Logs | OTLP logs | `Scout.logDebug/Info/Warning/Error` and (opt-in) `console.*` capture |
 
@@ -245,7 +245,7 @@ Scout defaults to **1% session sampling** (`sessionSampleRate: 1`). Out of every
 | Caught error reported via `Scout.reportError(...)` | `error` span | You always want failures visible. |
 | Uncaught JS exception, unhandled rejection, React error-boundary catch | `error` span | Same — drop on the floor isn't acceptable. |
 | `Scout.logError(...)` / ERROR-severity logs | log record | High-severity logs treated like errors. |
-| App crash (OOM / force-kill / unclean exit) | `app_crash` on next launch | Crashes that lose the prior session must reach you. |
+| Native crash marker (RN `app_crash`) | `app_crash` on next launch | Crashes that lose the prior session must reach you. (`app_unclean_exit` is not crash-class: it is reported only when the session it describes was sampled.) |
 | Native crash (iOS Mach exception / Android NDK signal / JVM uncaught) | `native_crash` on next launch | Same — fatal-class signal. |
 | ANR (app not responding) | `anr` span | Fatal-class UX failure. |
 
@@ -397,6 +397,20 @@ asserting in a smoke test, since a mis-wired relay is silently lossy.
 
 Prefer session adoption unless the WebView genuinely can't reach the
 collector; it needs no host-side relay code and loses nothing.
+
+---
+
+## Browser support
+
+Web builds emit ES2020 syntax and are tested down to **Chrome / Android System
+WebView 87** (Android 8.1) and **Safari 14**. The SDK calls no prototype method
+newer than that floor — `make check-compat` fails the build if `dist/` does —
+and gates dependency features behind runtime checks: `web-vitals`' CLS and INP
+tracking needs `Array.prototype.at` (Chrome 92) and is skipped below it, while
+LCP, FCP and TTFB still report. No polyfills are shipped. An error thrown from
+inside the SDK bundle is recorded with `error.origin: sdk` /
+`error.category: sdk_internal`, once per distinct failure per page, and does not
+count towards `error.count`.
 
 ---
 
