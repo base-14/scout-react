@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-09-22
+
 ### Fixed
 
 - **The web session marker no longer re-arms itself while the page is
