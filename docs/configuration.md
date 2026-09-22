@@ -174,7 +174,7 @@ Every auto-instrumentation can be turned off independently. All default to `true
 | `enableStartupTracking` | `true` | Cold/warm start timing. Emits `app_startup` spans with `app_startup.type` (`cold` \| `warm`), `app_startup.duration` (seconds) and `app_startup.duration_ms` (milliseconds). Native cold start is measured from the OS process start; web cold start from navigation start to `loadEventEnd`. |
 | `enableConnectivityTracking` | `true` | Network type changes (`wifi` → `cellular`), connection quality. |
 | `enablePerformanceMetrics` | `true` | Memory and CPU samples. |
-| `enableLongTaskDetection` | `true` | JS long tasks > `longTaskThresholdMs`. Emits `long_task` span. |
+| `enableLongTaskDetection` | `true` | JS long tasks > `longTaskThresholdMs`. Emits `long_task` spans, and `frozen_frame` spans for tasks ≥ 700 ms. Web reads Long Animation Frames where the browser has them (Chrome 123+) and `longtask` entries elsewhere, never both. Time the page spent hidden, frozen or suspended is not a long task: entries overlapping it are dropped, and `frozen_frame.duration` is capped at `frozenFrameMaxMs`. |
 | `enableAnrDetection` | `true` | RN App-Not-Responding via timer drift. Emits `anr` span. |
 | `enableFrameMetrics` | **`false`** | RN frame rate, slow frames, frozen frames. Emits `react_native.frame.*` metrics + `frozen_frame` spans. Opt-in: highest-volume signal the SDK produces. |
 | `enableMemoryMetrics` | **`false`** | RN/web process memory sampling. Emits `*.memory.*` metrics. Opt-in. |
@@ -207,6 +207,7 @@ reported as `redacted` rather than falling through to nearby text content.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `longTaskThresholdMs` | `number` | `100` | JS task duration that qualifies as a `long_task` span. Min `20`. |
+| `frozenFrameMaxMs` | `number` | `10000` | Cap for `frozen_frame.duration` (ms). A longer frame is reported at the cap with `frozen_frame.capped: true`. Min `700`. |
 | `anrThresholdMs` | `number` | `5000` | Timer-drift threshold that triggers an `anr` span. Min `1000`. |
 
 ## Resource attributes

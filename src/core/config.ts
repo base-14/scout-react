@@ -62,6 +62,13 @@ export interface ScoutConfig {
   captureConsole?: boolean;
   capturePrintStatements?: boolean;
   longTaskThresholdMs?: number;
+  /**
+   * Upper bound for `frozen_frame.duration`, in ms (default 10000, min 700).
+   * A frame longer than this is reported at the cap with
+   * `frozen_frame.capped: true` — a renderer suspended by its host mid-task
+   * can report one task spanning the whole suspension.
+   */
+  frozenFrameMaxMs?: number;
   anrThresholdMs?: number;
   iosHangThresholdMs?: number;
   sessionSampleRate?: number;
@@ -168,6 +175,7 @@ export interface ResolvedConfig extends Required<
 }
 export function resolveConfig(config: ScoutConfig): ResolvedConfig {
   const longTaskThresholdMs = Math.max(20, config.longTaskThresholdMs ?? 100);
+  const frozenFrameMaxMs = Math.max(700, config.frozenFrameMaxMs ?? 10000);
   const anrThresholdMs = Math.max(1000, config.anrThresholdMs ?? 5000);
   const iosHangRaw = config.iosHangThresholdMs ?? 250;
   const iosHangThresholdMs = iosHangRaw <= 0 ? 0 : Math.max(50, iosHangRaw);
@@ -218,6 +226,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     captureConsole,
     capturePrintStatements: captureConsole,
     longTaskThresholdMs,
+    frozenFrameMaxMs,
     anrThresholdMs,
     iosHangThresholdMs,
     sessionSampleRate,

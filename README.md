@@ -128,7 +128,7 @@ On Android USB devices, the OTLP endpoint runs on your dev machine — point it 
 | Errors (manual / boundary) | `error` span | `error.handled=true`, `error.component_stack` if from a React boundary |
 | Unhandled rejections | `error` span | Web: window event; RN: HermesInternal |
 | Long tasks | `long_task` | Default threshold 100ms |
-| Frozen frames | `frozen_frame` | Long task ≥ 700ms (web only) |
+| Frozen frames | `frozen_frame` | Long task ≥ 700ms; background / suspended time excluded, capped at `frozenFrameMaxMs` |
 | ANR | `anr` | Web: worker watchdog. RN: timer-drift watchdog. |
 | HTTP (fetch + XHR) | `http.request` | Method, URL, status, duration, content-length |
 | Unclean exit (OOM / force-kill / tab discard) | `app_unclean_exit` on next launch | Persistent session marker (localStorage on web, AsyncStorage on RN). Not a crash — `pagehide` also fails to fire on ordinary closes, so it never touches crash-free rate. Off by default inside embedded WebViews (`enableUncleanExitDetection`) |

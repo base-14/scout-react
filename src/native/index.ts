@@ -262,6 +262,9 @@ export const Scout = {
           core,
           resolved.longTaskThresholdMs,
           vitalsIntervalMs,
+          {
+            frozenFrameMaxMs: resolved.frozenFrameMaxMs,
+          },
         ),
       );
     if (resolved.captureConsole) _disposers.push(installNativeConsoleCapture(core));

@@ -159,6 +159,8 @@ export const ATTR = {
   UI_HANG_THRESHOLD: 'ui_hang.threshold',
   UI_HANG_MAIN_THREAD_STACK: 'ui_hang.main_thread_stack',
   FROZEN_FRAME_DURATION: 'frozen_frame.duration',
+  /** `true` when the duration was clamped to `frozenFrameMaxMs`. */
+  FROZEN_FRAME_CAPPED: 'frozen_frame.capped',
   HTTP_RESOURCE_ID: 'http.resource.id',
   HTTP_METHOD: 'http.request.method',
   HTTP_URL: 'url.full',
