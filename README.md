@@ -1,5 +1,8 @@
 # Scout React
 
+[![npm version](https://img.shields.io/npm/v/@base-14/scout-react.svg)](https://www.npmjs.com/package/@base-14/scout-react)
+[![license](https://img.shields.io/npm/l/@base-14/scout-react.svg)](https://github.com/base-14/scout-react/blob/main/LICENSE)
+
 Zero-config OpenTelemetry RUM (Real User Monitoring) for React (browser) and React Native. Install the package, call `Scout.initialize()` — that's it.
 
 Auto-captures clicks, navigation, errors, lifecycle, network, performance, web vitals, and device context. Exports over OTLP/HTTP.
