@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.20] - 2026-09-22
 
+Five RUM accuracy defects found in a page embedded in an Android app's WebView.
+Unclean exits, SDK-internal errors and frozen frames were all over-counted
+there; none of the fixes change what a correctly reported session looks like.
+
 ### Fixed
 
 - **The web session marker no longer re-arms itself while the page is
@@ -16,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   heartbeat wrote it back as active regardless of visibility. An embedded
   WebView keeps running timers after the host pauses it and is then destroyed
   without `pagehide`, so every routine close was reported as an
-  `app_unclean_exit` on the next open (snabbit saw ~8× more of them than
-  `app_startup`). The heartbeat now writes the current visibility, and the
+  `app_unclean_exit` on the next open (one such app reported ~8× more of them
+  than `app_startup`). The heartbeat now writes the current visibility, and the
   Page Lifecycle `freeze` / `resume` events clear and re-arm it. The native
   marker's heartbeat likewise writes the current `AppState`. (B14-2079)
 - **Unclean-exit reports follow the dead session's sampling decision.** The
@@ -29,15 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so kill → reopen → kill filed the same session once per reopen (up to 7
   times in the field). The marker remembers the last session it reported.
   (B14-2081)
-
-### Added
-
-- `enableUncleanExitDetection` config flag. Defaults to `true`, and on web to
-  `false` inside an embedded WebView (Android system WebView `wv` UA token, or
-  an iOS WKWebView UA with no `Safari/` product), where the host closes the
-  page without any unload signal. Pass it explicitly to override the
-  heuristic. Also reported in the `scout.config` log. (B14-2079)
-
 - **`web-vitals` no longer throws on Chrome < 92 WebViews.** web-vitals 5
   calls `Array.prototype.at()` while tracking CLS and INP; on an Android 8.1
   system WebView (Chrome 87) that is `TypeError: this.o.at is not a function`
@@ -57,18 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Each installer is mounted in its own guard; before, a synchronous throw left
   the providers unregistered so `flush()` / `shutdown()` were no-ops and every
   later instrumentation was skipped.
-
-### Added
-
-- Browser floor: web builds are checked against Chrome / Android System
-  WebView 87 and Safari 14. `make check-compat` (part of `make ci`) fails the
-  build when `dist/` calls a runtime API newer than that floor.
-
 - **`frozen_frame` / `long_task` no longer charge time the page spent in the
   background.** Web long tasks come from `PerformanceObserver` entries, and a
   WebView renderer suspended by its host mid-task reports one task spanning
-  the whole suspension when it resumes — snabbit saw 25 s "frozen frames"
-  that were the user switching apps. Entries overlapping a hidden, frozen or
+  the whole suspension when it resumes — 25 s "frozen frames" were reported
+  that were really the user switching apps. Entries overlapping a hidden,
+  frozen or
   suspended interval are dropped, buffered entries from before the SDK
   installed are ignored, and `frozen_frame.duration` is capped at the new
   `frozenFrameMaxMs` (default 10 s) with `frozen_frame.capped: true`. The
@@ -77,12 +66,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One stall, one span.** Where the browser has Long Animation Frames
   (Chrome 123+) the tracker no longer also observes `longtask`, which
   described the same stall a second time — two `long_task`, two
-  `frozen_frame`, two counter increments.
+  `frozen_frame`, two counter increments. (B14-2083)
 
 ### Added
 
+- `enableUncleanExitDetection` config flag. Defaults to `true`, and on web to
+  `false` inside an embedded WebView (Android system WebView `wv` UA token, or
+  an iOS WKWebView UA with no `Safari/` product), where the host closes the
+  page without any unload signal. Pass it explicitly to override the
+  heuristic. Also reported in the `scout.config` log. (B14-2079)
 - `frozenFrameMaxMs` config (default `10000`, min `700`) and the
-  `frozen_frame.capped` attribute.
+  `frozen_frame.capped` attribute. (B14-2083)
+- `error.origin` (`app` or `sdk`) on every error span, and
+  `error.category: sdk_internal` on the SDK's own. (B14-2082)
+- Browser floor: web builds are checked against Chrome / Android System
+  WebView 87 and Safari 14. `make check-compat` (part of `make ci`) fails the
+  build when `dist/` calls a runtime API newer than that floor.
 
 ## [0.1.19] - 2026-09-19
 
