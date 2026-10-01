@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { isEmbeddedWebView } from './platform';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { isEmbeddedWebView, WebPlatform } from './platform';
+import { ATTR } from '../core/attributes';
 
 const ANDROID_WEBVIEW =
   'Mozilla/5.0 (Linux; Android 15; itel A6611L Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/137.0.7151.115 Mobile Safari/537.36';
@@ -34,5 +35,40 @@ describe('isEmbeddedWebView', () => {
     expect(isEmbeddedWebView(undefined as unknown as string)).toBe(
       isEmbeddedWebView(globalThis.navigator?.userAgent),
     );
+  });
+});
+
+describe('WebPlatform network signals', () => {
+  const CELLULAR = { type: 'cellular', effectiveType: '4g', rtt: 100, downlink: 1.55 };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the transport as the connection type, not the effective type', () => {
+    vi.stubGlobal('navigator', { connection: CELLULAR });
+    expect(new WebPlatform().getConnectionType()).toBe('cellular');
+  });
+
+  it('exposes effectiveType, rtt and downlink as network quality', () => {
+    vi.stubGlobal('navigator', { connection: CELLULAR });
+    expect(new WebPlatform().getNetworkQuality()).toEqual({
+      effectiveType: '4g',
+      rttMs: 100,
+      downlinkMbps: 1.55,
+    });
+  });
+
+  it('degrades to unknown where the Network Information API is absent', () => {
+    vi.stubGlobal('navigator', {});
+    const platform = new WebPlatform();
+    expect(platform.getConnectionType()).toBe('unknown');
+    expect(platform.getNetworkQuality()).toEqual({});
+  });
+
+  it('stamps the live transport on the resource instead of a literal unknown', async () => {
+    vi.stubGlobal('navigator', { connection: { type: 'wifi', effectiveType: '4g' } });
+    const attrs = await new WebPlatform().collectResourceAttributes();
+    expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBe('wifi');
   });
 });

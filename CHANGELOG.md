@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-09-30
+
+### Added
+
+- **Network quality on every span.** `network.connection.effective_type`
+  (`slow-2g` / `2g` / `3g` / `4g`), `network.connection.rtt_ms` and
+  `network.connection.downlink_mbps` are read from the Network Information API
+  per span, so a connection that degrades mid-session is visible. Chromium
+  only; Safari and Firefox do not implement the API and report nothing.
+  Suppressed by `enableConnectivityTracking: false`. (B14-1928)
+
+### Fixed
+
+- **`network.connection.type` reports the real transport instead of the literal
+  `"unknown"`.** The web resource attribute was hard-coded, so every browser
+  session shipped `unknown` while the SDK already held the live value. It now
+  carries the transport the browser reports (`cellular` / `wifi` / `ethernet`
+  / ...), matching the value space the native SDKs emit, and is also stamped
+  per span. `effectiveType` no longer leaks into this attribute: it is a
+  round-trip-time estimate, not a transport, and now has its own key.
+  (B14-1928)
+
 ## [0.1.20] - 2026-09-22
 
 Five RUM accuracy defects found in a page embedded in an Android app's WebView.
@@ -1080,6 +1102,7 @@ Initial release.
   `ErrorUtils` → `error.handled=false`.
 
 [Unreleased]: https://github.com/base-14/scout-react/compare/v0.1.20...HEAD
+[0.1.21]: https://github.com/base-14/scout-react/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/base-14/scout-react/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/base-14/scout-react/compare/v0.1.17...v0.1.19
 [0.1.18]: https://github.com/base-14/scout-react/commit/8990d6eda2dea16faa8270f0dad4c7b54e92b78b

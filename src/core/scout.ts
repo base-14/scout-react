@@ -310,6 +310,21 @@ export class Scout {
     for (const [k, v] of Object.entries(this.user.attributes)) {
       attrs[k.startsWith('user.') ? k : `user.${k}`] = v;
     }
+    if (this._config.enableConnectivityTracking) {
+      if (this._connectionType && this._connectionType !== 'unknown') {
+        attrs[ATTR.NETWORK_CONNECTION_TYPE] = this._connectionType;
+      }
+      const quality = this.platform.getNetworkQuality?.();
+      if (quality?.effectiveType) {
+        attrs[ATTR.NETWORK_CONNECTION_EFFECTIVE_TYPE] = quality.effectiveType;
+      }
+      if (typeof quality?.rttMs === 'number') {
+        attrs[ATTR.NETWORK_CONNECTION_RTT_MS] = quality.rttMs;
+      }
+      if (typeof quality?.downlinkMbps === 'number') {
+        attrs[ATTR.NETWORK_CONNECTION_DOWNLINK_MBPS] = quality.downlinkMbps;
+      }
+    }
     const anon = this._anonymousId;
     if (anon) attrs[ATTR.USER_ANONYMOUS_ID] = anon;
     return attrs;

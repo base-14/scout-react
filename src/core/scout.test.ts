@@ -18,6 +18,24 @@ async function makeScout(overrides: Record<string, unknown> = {}) {
   await s.bootstrap();
   return s;
 }
+async function makeScoutOn(
+  platformOverrides: Record<string, unknown>,
+  configOverrides: Record<string, unknown> = {},
+) {
+  const platform = { ...memoryPlatform(), ...platformOverrides };
+  const s = new Scout(
+    {
+      serviceName: 'test-svc',
+      endpoint: 'http://localhost:4318',
+      secure: false,
+      sessionSampleRate: 100,
+      ...configOverrides,
+    } as never,
+    platform as never,
+  );
+  await s.bootstrap();
+  return s;
+}
 describe('Scout.commonAttributes', () => {
   beforeEach(() => {
     makeRecorder();
@@ -29,6 +47,31 @@ describe('Scout.commonAttributes', () => {
     expect(attrs[ATTR.SESSION_START_TIME]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(typeof attrs[ATTR.SESSION_SAMPLE_RATE]).toBe('string');
     expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBeUndefined();
+  });
+  it('carries the live transport and network quality the platform reports', async () => {
+    const s = await makeScoutOn({
+      getConnectionType: () => 'cellular',
+      getNetworkQuality: () => ({ effectiveType: '4g', rttMs: 150, downlinkMbps: 1.4 }),
+    });
+    const attrs = s.commonAttributes();
+    expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBe('cellular');
+    expect(attrs[ATTR.NETWORK_CONNECTION_EFFECTIVE_TYPE]).toBe('4g');
+    expect(attrs[ATTR.NETWORK_CONNECTION_RTT_MS]).toBe(150);
+    expect(attrs[ATTR.NETWORK_CONNECTION_DOWNLINK_MBPS]).toBe(1.4);
+  });
+  it('omits every network attribute when connectivity tracking is off', async () => {
+    const s = await makeScoutOn(
+      {
+        getConnectionType: () => 'cellular',
+        getNetworkQuality: () => ({ effectiveType: '4g', rttMs: 150, downlinkMbps: 1.4 }),
+      },
+      { enableConnectivityTracking: false },
+    );
+    const attrs = s.commonAttributes();
+    expect(attrs[ATTR.NETWORK_CONNECTION_TYPE]).toBeUndefined();
+    expect(attrs[ATTR.NETWORK_CONNECTION_EFFECTIVE_TYPE]).toBeUndefined();
+    expect(attrs[ATTR.NETWORK_CONNECTION_RTT_MS]).toBeUndefined();
+    expect(attrs[ATTR.NETWORK_CONNECTION_DOWNLINK_MBPS]).toBeUndefined();
   });
   it('includes user.id and user.* attrs once setUser is called', async () => {
     const s = await makeScout();

@@ -33,6 +33,13 @@ describe('attribute / span / metric name contract', () => {
     expect(ATTR.DEVICE_BATTERY_LEVEL).toBe('device.battery.level');
     expect(ATTR.DEVICE_BATTERY_STATE).toBe('device.battery.state');
     expect(ATTR.NETWORK_CONNECTION_TYPE).toBe('network.connection.type');
+    expect(ATTR.NETWORK_CONNECTION_EFFECTIVE_TYPE).toBe(
+      'network.connection.effective_type',
+    );
+    expect(ATTR.NETWORK_CONNECTION_RTT_MS).toBe('network.connection.rtt_ms');
+    expect(ATTR.NETWORK_CONNECTION_DOWNLINK_MBPS).toBe(
+      'network.connection.downlink_mbps',
+    );
   });
   it('keeps span names stable', () => {
     expect(SPAN.USER_INTERACTION).toBe('user_interaction');

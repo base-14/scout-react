@@ -1,3 +1,8 @@
+export interface NetworkQuality {
+  effectiveType?: string;
+  rttMs?: number;
+  downlinkMbps?: number;
+}
 export interface PlatformAdapter {
   readonly name: 'web' | 'react-native';
   getItem(key: string): Promise<string | null>;
@@ -5,6 +10,7 @@ export interface PlatformAdapter {
   removeItem(key: string): Promise<void>;
   collectResourceAttributes(): Promise<Record<string, string | number | boolean>>;
   getConnectionType(): string;
+  getNetworkQuality?(): NetworkQuality;
   onConnectivityChange?(handler: (type: string) => void): () => void;
   readAppVersion?(): Promise<string | null>;
   readAppMetadata?(): Promise<{

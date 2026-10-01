@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '../core/platform';
+import type { NetworkQuality, PlatformAdapter } from '../core/platform';
 import { ATTR } from '../core/attributes';
 /**
  * Whether the page is hosted by a native app's WebView rather than a browser.
@@ -19,6 +19,10 @@ export function isEmbeddedWebView(userAgent?: string): boolean {
     return true;
   }
   return false;
+}
+function connectionInfo(): any {
+  const nav = (globalThis as any).navigator;
+  return nav?.connection ?? nav?.mozConnection ?? nav?.webkitConnection;
 }
 export class WebPlatform implements PlatformAdapter {
   readonly name = 'web' as const;
@@ -41,7 +45,7 @@ export class WebPlatform implements PlatformAdapter {
   }
   async collectResourceAttributes(): Promise<Record<string, string | number | boolean>> {
     const attrs: Record<string, string | number | boolean> = {};
-    attrs[ATTR.NETWORK_CONNECTION_TYPE] = 'unknown';
+    attrs[ATTR.NETWORK_CONNECTION_TYPE] = this.getConnectionType();
     try {
       const loc = (globalThis as any).location;
       if (loc?.origin) attrs[ATTR.APP_BUNDLE_ID] = String(loc.origin);
@@ -84,15 +88,22 @@ export class WebPlatform implements PlatformAdapter {
     return attrs;
   }
   getConnectionType(): string {
-    const nav = (globalThis as any).navigator;
-    const c = nav?.connection ?? nav?.mozConnection ?? nav?.webkitConnection;
-    if (c?.effectiveType) return String(c.effectiveType);
+    const c = connectionInfo();
     if (c?.type) return String(c.type);
     return 'unknown';
   }
+  getNetworkQuality(): NetworkQuality {
+    const c = connectionInfo();
+    const quality: NetworkQuality = {};
+    if (c?.effectiveType) quality.effectiveType = String(c.effectiveType);
+    if (typeof c?.rtt === 'number' && Number.isFinite(c.rtt)) quality.rttMs = c.rtt;
+    if (typeof c?.downlink === 'number' && Number.isFinite(c.downlink)) {
+      quality.downlinkMbps = c.downlink;
+    }
+    return quality;
+  }
   onConnectivityChange(handler: (type: string) => void): () => void {
-    const nav = (globalThis as any).navigator;
-    const c = nav?.connection ?? nav?.mozConnection ?? nav?.webkitConnection;
+    const c = connectionInfo();
     if (!c?.addEventListener) return () => {};
     const fn = () => {
       handler(this.getConnectionType());
