@@ -37,6 +37,26 @@ Peer deps are installed by the host app on demand (none of them are required for
 | RN + device model/manufacturer | `react-native-device-info` |
 | RN + battery level | `expo-battery` (preferred) or `react-native-device-info` |
 
+### Bare React Native (no Expo)
+
+The native layer (`ScoutCrash`: ANR / UI-hang detection, native crash capture, accurate cold-start timing) is built on the [Expo Modules API](https://docs.expo.dev/modules/overview/). That's the only part of Expo it uses — no managed workflow, Expo CLI, or Expo Go. Bare apps need Expo's module infrastructure installed once:
+
+```bash
+npx install-expo-modules@latest
+npx pod-install
+```
+
+This adds the `expo` package and wires up autolinking in `MainApplication` / `AppDelegate`. Installing `expo-modules-core` on its own is not enough — the module won't be linked.
+
+Native capture behaves identically in bare and Expo apps. If the module isn't linked, the SDK doesn't fail: it falls back to JS-only capture, which means no ANR, hang, or native-crash spans, and cold start measured from JS bundle load instead of process start. To confirm it's linked, check in a release build on both platforms:
+
+```ts
+import { requireOptionalNativeModule } from 'expo-modules-core';
+
+const mod = requireOptionalNativeModule('ScoutCrash');
+console.log('ScoutCrash linked:', !!mod && (await mod.isInstalled()));
+```
+
 ---
 
 ## Quick start — React (browser)
