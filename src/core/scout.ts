@@ -16,7 +16,11 @@ import { SPAN, BREADCRUMB_TYPE, ERROR_CLASS_SPANS } from './spans';
 import { METRIC } from './metrics';
 import { applyBeforeSend } from './before-send';
 import { BreadcrumbManager } from './breadcrumb-manager';
-import { SessionManager } from './session-manager';
+import {
+  SessionManager,
+  shouldRotateOnIdentityChange,
+  type SamplingSource,
+} from './session-manager';
 import { UserManager } from './user-manager';
 import { SEVERITY_NUMBER } from './logger';
 import { resolveConfig, type ResolvedConfig, type ScoutConfig } from './config';
@@ -54,7 +58,17 @@ export interface WebViewBridgeOptions {
    * host-side relay silently drops the page's spans.
    */
   relay?: boolean;
+  /**
+   * The host's sampling decision for the adopted session. When it is
+   * supplied, the page follows it, so a host "no" stops the page's spans too.
+   * When it is omitted (older hosts), the page is forced sampled, as before.
+   */
+  sampled?: boolean;
+  /** Where the host's decision came from; stamped as `session.sampling_source`. */
+  samplingSource?: SamplingSource;
 }
+/** Storage key for the latest app-supplied per-user sampling value. */
+export const USER_SAMPLING_KEY = 'scout.user_sampling';
 const MAX_STACK_LEN = 8000;
 function errorFingerprint(type: string, message: string, stack: string): string {
   const firstFrame =
@@ -136,6 +150,8 @@ export class Scout {
   private _connectionType = 'unknown';
   private _rootSpan: Span | null = null;
   private _runtimeAttrs: Attributes = {};
+  /** Set once `setUserSampling` runs, so bootstrap hydration never overwrites a newer value. */
+  private _userSamplingSetAtRuntime = false;
   constructor(config: ScoutConfig, platform: PlatformAdapter) {
     this._config = resolveConfig(config);
     this.platform = platform;
@@ -150,6 +166,9 @@ export class Scout {
     this.breadcrumbs = new BreadcrumbManager(platform);
   }
   async bootstrap(): Promise<void> {
+    // The decision for a new session is made inside session.start(), so the
+    // pending per-user value must be in memory before it runs.
+    await this.hydrateUserSampling();
     await this.session.start();
     await this.breadcrumbs.hydrate();
     try {
@@ -206,6 +225,60 @@ export class Scout {
   }
   get config(): ResolvedConfig {
     return this._config;
+  }
+  /**
+   * Resolves the per-user value in effect at launch: `init ?? stored ?? null`.
+   * A non-null init value is persisted, while a null init value means "no
+   * opinion" and keeps the stored one. A `setUserSampling` call that arrived
+   * before bootstrap wins over both.
+   */
+  private async hydrateUserSampling(): Promise<void> {
+    if (this._userSamplingSetAtRuntime) return;
+    const init = this._config.userSampling;
+    if (init !== null) {
+      this.session.setPendingUserSampling(init);
+      await this.persistUserSampling(init);
+      return;
+    }
+    let stored: boolean | null = null;
+    try {
+      const raw = await this.platform.getItem(USER_SAMPLING_KEY);
+      stored = raw === 'true' ? true : raw === 'false' ? false : null;
+    } catch {}
+    if (!this._userSamplingSetAtRuntime) this.session.setPendingUserSampling(stored);
+  }
+  private async persistUserSampling(value: boolean | null): Promise<void> {
+    try {
+      if (value === null) await this.platform.removeItem(USER_SAMPLING_KEY);
+      else await this.platform.setItem(USER_SAMPLING_KEY, String(value));
+    } catch {}
+  }
+  /**
+   * Per-user sampling decided by your app, typically from its remote config.
+   * `true` keeps this user's sessions, `false` drops their spans (logs and
+   * metrics still flow), and `null` falls back to `sessionSampleRate`. The
+   * value applies from the next session start and never changes the current
+   * session. It is persisted, so the next launch honours it too.
+   */
+  setUserSampling(value: boolean | null): void {
+    const v = typeof value === 'boolean' ? value : null;
+    this._userSamplingSetAtRuntime = true;
+    this.session.setPendingUserSampling(v);
+    void this.persistUserSampling(v);
+    this.debug('userSampling', v, '(applies at next session start)');
+  }
+  /** The latest app-supplied per-user value; `null` means none. */
+  get userSampling(): boolean | null {
+    return this.session.pendingUserSamplingValue;
+  }
+  private rotateIfUserChanged(previous: string | null, next: string | null): void {
+    const rotate = shouldRotateOnIdentityChange(
+      previous,
+      next,
+      this.session.samplingSource,
+      this.session.pendingUserSamplingValue,
+    );
+    if (rotate) void this.session.rotate();
   }
   get sessionId(): string | null {
     return this.session.sessionId;
@@ -297,6 +370,8 @@ export class Scout {
       [ATTR.SESSION_SAMPLE_RATE]: String(this.session.configuredSampleRate),
       ...this._runtimeAttrs,
     };
+    const source = this.session.samplingSource;
+    if (source) attrs[ATTR.SESSION_SAMPLING_SOURCE] = source;
     const sid = this.session.sessionId;
     if (sid) attrs[ATTR.SESSION_ID] = sid;
     const startIso = this.session.startedAtIso;
@@ -346,6 +421,8 @@ export class Scout {
       [ATTR.SESSION_TYPE]: 'user',
       [ATTR.SESSION_SAMPLE_RATE]: String(this.session.configuredSampleRate),
     };
+    const source = this.session.samplingSource;
+    if (source) attrs[ATTR.SESSION_SAMPLING_SOURCE] = source;
     const sid = this.session.sessionId;
     if (sid) attrs[ATTR.SESSION_ID] = sid;
     if (this._currentScreen) attrs[ATTR.SCREEN_NAME] = this._currentScreen;
@@ -376,7 +453,10 @@ export class Scout {
    */
   setWebViewBridge(bridge: WebViewBridgeOptions): void {
     if (typeof bridge?.sessionId === 'string' && bridge.sessionId) {
-      this.session.adoptExternalSessionId(bridge.sessionId);
+      this.session.adoptExternalSessionId(bridge.sessionId, {
+        sampled: bridge.sampled,
+        samplingSource: bridge.samplingSource,
+      });
     }
     if (typeof bridge?.anonymousId === 'string' && bridge.anonymousId) {
       this._anonymousId = bridge.anonymousId;
@@ -588,11 +668,23 @@ export class Scout {
       `uncaught_error: ${runtimeTypeOf(error)}`,
     );
   }
+  /**
+   * Sets the current user. Switching from one id to a different id starts a
+   * new session while user sampling is in play, so the new user never
+   * inherits the previous user's sampling decision. On an account switch,
+   * call `setUserSampling(newValue)` before `setUser(newId)`.
+   */
   setUser(id: string, attributes?: Attributes): void {
+    const previous = this.user.id;
     this.user.set(id, attributes);
+    this.rotateIfUserChanged(previous, this.user.id);
   }
+  /** Clears the user and the per-user sampling value. Starts a new session if user sampling was in play. */
   clearUser(): void {
+    const previous = this.user.id;
     this.user.clear();
+    this.setUserSampling(null);
+    this.rotateIfUserChanged(previous, null);
   }
   logDebug(message: string, opts?: LogOpts | Attributes): void {
     this.emitLog('DEBUG', message, mergeLogAttrs(opts));
@@ -792,7 +884,7 @@ export class Scout {
     }
   }
   emitHistogram(name: string, value: number, attrs: Attributes = {}): void {
-    if (!this.session.isSampled) return;
+    if (!this.session.allowsLogsAndMetrics) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
       ...this.metricAttributes(),
@@ -813,7 +905,7 @@ export class Scout {
     }
   }
   emitGauge(name: string, value: number, attrs: Attributes = {}): void {
-    if (!this.session.isSampled) return;
+    if (!this.session.allowsLogsAndMetrics) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
       ...this.metricAttributes(),
@@ -843,11 +935,12 @@ export class Scout {
   ): void {
     if (!this._config.enableLogging) return;
     const bypassForErrors = this._config.alwaysCaptureErrors && severity === 'ERROR';
-    if (!opts.forceSample && !bypassForErrors && !this.session.isSampled) {
+    if (!opts.forceSample && !bypassForErrors && !this.session.allowsLogsAndMetrics) {
       return;
     }
     const base: Attributes = {
       ...this.commonAttributes(),
+      ...(this.session.isSampled ? {} : { [ATTR.SESSION_SAMPLED]: 'false' }),
       ...(attributes ?? {}),
     };
     const filtered = applyBeforeSend(this._config.beforeSend, 'log', 'log', base, {

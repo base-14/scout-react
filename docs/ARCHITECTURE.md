@@ -341,7 +341,7 @@ Four rules that hold for every tracker:
 
 | Concern | Where | How |
 |---|---|---|
-| **Session lifecycle** | `src/core/session-manager.ts` | Persisted `{id, startedAt, lastActiveAt, sampled}`. 30-min idle → new session ID on resume. `sampled` decided once via `Math.random()*100 < rate`; sticky for the session. |
+| **Session lifecycle** | `src/core/session-manager.ts` | Persisted `{id, startedAt, lastActiveAt, sampled, samplingSource}`. 30-min idle → new session ID on resume. `sampled` is decided once, at session creation: the app's per-user value (`userSampling` / `setUserSampling`, stored under `scout.user_sampling`) if set, else `Math.random()*100 < rate`; sticky for the session. User switches rotate while user sampling is in play (`shouldRotateOnIdentityChange`). Log/metric gates also pass for user-"no" sessions (`allowsLogsAndMetrics`); span gates do not. |
 | **Breadcrumbs** | `src/core/breadcrumb-manager.ts` | Ring buffer of 20 `{type, message, time}`, persisted on every push. Serialized JSON attached to every `error`, `app_unclean_exit` and `native_crash` span. |
 | **`beforeSend` filtering** | `src/core/before-send.ts` | Runs on every span/metric/log before export. Return `null` to drop, return a modified event to scrub PII. `type` and `name` are read-only — stripped from the result. |
 | **PlatformAdapter** | `src/core/platform.ts` + `src/{web,native}/platform.ts` | Six methods: `getItem/setItem/removeItem`, `collectResourceAttributes`, `getConnectionType`, `onConnectivityChange`. Core never imports DOM or RN. |

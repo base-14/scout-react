@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **User-based sampling: `userSampling` / `Scout.setUserSampling()`.**
+  Previously every session was sampled independently, so one user ended up with
+  some sessions kept and others dropped. Your app can now decide per user,
+  typically from its own remote config: `true` keeps all of that user's
+  sessions, `false` drops their spans, and `null` (the default) keeps today's
+  roll at `sessionSampleRate`. The value is decided once per session, applies
+  from the next session start, and is persisted. A "no" user still sends logs
+  and metrics, and error-class spans still pass while `alwaysCaptureErrors` is
+  on. `clearUser()` resets the value. With user sampling in play, `clearUser()`
+  and `setUser()` with a different id start a new session. Spans, logs and
+  metrics carry `session.sampling_source` (`user` | `fallback`).
+- **WebView pages follow the host's sampling decision.**
+  `setWebViewBridge({ sampled, samplingSource })` binds the page to the host's
+  decision, so a host "no" stops the page's spans too, including in
+  session-only mode. Hosts that send no `sampled` keep the old forced-sampled
+  behaviour.
+
+### Changed
+
+- **`session.sampling_source` is a new metric dimension.** It has two values, so
+  cardinality stays bounded.
+
 ## [0.1.21] - 2026-09-30
 
 ### Added

@@ -6,6 +6,7 @@ export const ATTR = {
   SESSION_START_TIME: 'session.start_time',
   SESSION_SAMPLE_RATE: 'session.sample_rate',
   SESSION_SAMPLED: 'session.sampled',
+  SESSION_SAMPLING_SOURCE: 'session.sampling_source',
   USER_ID: 'user.id',
   USER_ANONYMOUS_ID: 'user.anonymous_id',
   ACCOUNT_ID: 'account.id',

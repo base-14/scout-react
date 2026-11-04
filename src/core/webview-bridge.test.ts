@@ -43,11 +43,40 @@ describe('setWebViewBridge — session adoption', () => {
     expect(span?.attributes[ATTR.USER_ANONYMOUS_ID]).toBe('anon-abc');
   });
 
-  it('forces the adopted session to be sampled', async () => {
+  it('forces the adopted session to be sampled when a legacy host sends no decision', async () => {
     const s = await makeScout({ sessionSampleRate: 0 });
     s.setWebViewBridge({ sessionId: 'native-session-42' });
     s.logEvent('sampled_in', {});
-    expect(rec.spans().some((x) => x.name === 'sampled_in')).toBe(true);
+    const span = rec.spans().find((x) => x.name === 'sampled_in');
+    expect(span).toBeDefined();
+    expect(span?.attributes[ATTR.SESSION_SAMPLING_SOURCE]).toBeUndefined();
+  });
+
+  it("follows a host's 'no' decision so the page's spans stop too", async () => {
+    const s = await makeScout({ sessionSampleRate: 100 });
+    s.setWebViewBridge({
+      sessionId: 'native-session-42',
+      sampled: false,
+      samplingSource: 'user',
+    });
+    s.logEvent('dropped', {});
+    s.logInfo('still logged');
+    expect(rec.spans().some((x) => x.name === 'dropped')).toBe(false);
+    const log = rec.logs()[0];
+    expect(log?.attributes[ATTR.SESSION_ID]).toBe('native-session-42');
+    expect(log?.attributes[ATTR.SESSION_SAMPLING_SOURCE]).toBe('user');
+  });
+
+  it("follows a host's 'yes' decision and stamps its source", async () => {
+    const s = await makeScout({ sessionSampleRate: 0 });
+    s.setWebViewBridge({
+      sessionId: 'native-session-42',
+      sampled: true,
+      samplingSource: 'fallback',
+    });
+    s.logEvent('kept', {});
+    const span = rec.spans().find((x) => x.name === 'kept');
+    expect(span?.attributes[ATTR.SESSION_SAMPLING_SOURCE]).toBe('fallback');
   });
 
   it('ignores empty and non-string identity fields', async () => {

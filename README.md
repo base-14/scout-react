@@ -229,6 +229,8 @@ Third-party hosts (Stripe, Google Fonts, Segment, etc.) are still captured as `h
 ```ts
 Scout.setUser('user-123', { email: 'jane@example.com', plan: 'pro' });
 Scout.clearUser();
+// With user-based sampling in play, switching to a different user (or
+// clearUser) starts a new session. See "User-based sampling" below.
 
 Scout.addBreadcrumb('checkout', 'added item to cart');
 Scout.addBreadcrumb('checkout', 'entered payment details');
@@ -290,6 +292,32 @@ Scout.initialize({
 ```
 
 The sampling decision is made **once per session**, then frozen for that session's lifetime. A session is either fully sampled in (every signal flows) or sampled out (only error-class signals flow). This keeps individual sessions coherent — you never get half-a-trace.
+
+### User-based sampling — let your app decide per user
+
+Per-session sampling means one user ends up with some sessions kept and others dropped. To decide **per user** instead, for example by cohort, plan or geography, pass a value from your own remote config or feature-flag service. Scout makes no network call for this; the targeting is entirely yours.
+
+```ts
+// At startup: the last-fetched remote-config value, read synchronously from its cache.
+Scout.initialize({ serviceName: 'my-app', endpoint, userSampling: remoteConfig.cached('scout_user_sampling') });
+
+// When the value arrives or changes (fetch completes, user logs in):
+Scout.setUserSampling(true);  // keep this user's sessions
+Scout.setUserSampling(false); // drop this user's spans; logs and metrics still flow
+Scout.setUserSampling(null);  // no opinion: fall back to sessionSampleRate
+```
+
+| Value at session start | Spans | Logs and metrics |
+|---|---|---|
+| `true` | all sent | sent |
+| `false` | none, except error-class spans while `alwaysCaptureErrors` is on | **still sent** |
+| `null` / never set | `sessionSampleRate` roll, as above | as above |
+
+- **Applies at the next session start, never mid-session.** A new session starts after idle timeout, after max duration, on a reload after the session expired, or on a user switch. A reload within the session keeps its decision.
+- **Persisted.** The latest value is stored, so a load that passes nothing still honours it. A non-null `userSampling` at init wins over the stored value. A `setUserSampling` call made before `initialize()` resolves is held and decides the first session.
+- **User switches.** While user sampling is in play, `clearUser()` (which also resets the value), and `setUser()` with an id different from the previous one, start a new session. On an account switch, call `setUserSampling(newValue)` **before** `setUser(newId)`. Going from anonymous to the first login keeps the current session.
+- **Verify in Scout.** Every span, log and metric carries `session.sampling_source` = `user` | `fallback`.
+- **Not a kill switch.** The SDK keeps running for a "no" user; only their spans stop.
 
 ---
 

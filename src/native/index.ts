@@ -65,6 +65,10 @@ export type {
 } from '../core/types';
 export type { ScoutConfig } from '../core/config';
 let _instance: ScoutCore | null = null;
+/** The core between construction and the end of bootstrap, so early runtime calls still reach it. */
+let _bootingCore: ScoutCore | null = null;
+/** A `setUserSampling` call made before `init()` constructed the core. */
+let _pendingUserSampling: { value: boolean | null } | undefined;
 const _disposers: Array<() => void> = [];
 const _pendingNavigationRefs: any[] = [];
 interface BufferedError {
@@ -210,7 +214,16 @@ export const Scout = {
     logs.setGlobalLoggerProvider(loggerProvider);
     (Scout as any)._providers = { traceProvider, meterProvider, loggerProvider };
     const core = new ScoutCore(config, platform);
-    await core.bootstrap();
+    if (_pendingUserSampling) {
+      core.setUserSampling(_pendingUserSampling.value);
+      _pendingUserSampling = undefined;
+    }
+    _bootingCore = core;
+    try {
+      await core.bootstrap();
+    } finally {
+      _bootingCore = null;
+    }
     _instance = core;
     void offline.drainAll(headers);
     if (resolved.enableLifecycleTracking) {
@@ -427,6 +440,20 @@ export const Scout = {
   clearUser(): void {
     _instance?.clearUser();
   },
+  /**
+   * Per-user sampling decided by your app, typically from your own remote
+   * config. `true` keeps this user's sessions, `false` drops their spans
+   * (logs and metrics still flow), and `null` falls back to
+   * `sessionSampleRate`. The value applies from the next session start,
+   * never mid-session, and is persisted. A call made before `init()`
+   * completes is held and applied before the first session is decided.
+   */
+  setUserSampling(value: boolean | null): void {
+    const target = _instance ?? _bootingCore;
+    if (target) target.setUserSampling(value);
+    else _pendingUserSampling = { value };
+  },
+
   setSessionAttributes(attrs: Attributes): void {
     _instance?.setSessionAttributes(attrs);
   },
@@ -503,6 +530,7 @@ export const Scout = {
     }
     await _instance?.shutdown();
     _instance = null;
+    _pendingUserSampling = undefined;
   },
 };
 export default Scout;

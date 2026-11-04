@@ -75,6 +75,14 @@ export interface ScoutConfig {
   sessionTimeoutMinutes?: number;
   maxSessionDurationMinutes?: number;
   alwaysCaptureErrors?: boolean;
+  /**
+   * Per-user sampling decided by your app, typically from your own remote
+   * config or feature flags. `true` keeps this user's sessions, `false` drops
+   * their spans (logs and metrics still flow), and `null`/omitted falls back
+   * to `sessionSampleRate`. It applies from the next session start and is
+   * persisted; see `Scout.setUserSampling`.
+   */
+  userSampling?: boolean | null;
   firstPartyHosts?: Array<string | RegExp>;
   ignoreUrlPatterns?: RegExp[];
   /**
@@ -233,6 +241,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     sessionTimeoutMinutes: config.sessionTimeoutMinutes ?? 30,
     maxSessionDurationMinutes: Math.max(0, config.maxSessionDurationMinutes ?? 60),
     alwaysCaptureErrors: config.alwaysCaptureErrors ?? true,
+    userSampling: config.userSampling ?? null,
     firstPartyHosts: config.firstPartyHosts,
     ignoreUrlPatterns: config.ignoreUrlPatterns,
     thirdPartyResources: config.thirdPartyResources ?? 'sanitized',
