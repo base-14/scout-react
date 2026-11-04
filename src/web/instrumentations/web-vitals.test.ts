@@ -157,6 +157,7 @@ describe('installWebVitalsTracker', () => {
           'screen.name',
           'session.id',
           'session.sample_rate',
+          'session.sampling_source',
           'session.type',
           'web.vital.name',
           'web.vital.rating',

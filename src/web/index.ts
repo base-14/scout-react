@@ -61,6 +61,10 @@ export type {
 export type { ScoutConfig } from '../core/config';
 export type { WebViewBridgeOptions } from '../core/scout';
 let _instance: ScoutCore | null = null;
+/** The core between construction and the end of bootstrap, so early runtime calls still reach it. */
+let _bootingCore: ScoutCore | null = null;
+/** A `setUserSampling` call made before `init()` constructed the core. */
+let _pendingUserSampling: { value: boolean | null } | undefined;
 const _disposers: Array<() => void> = [];
 // Closed while a native host relays this page's spans, so the same span is
 // not delivered twice. Assigned during initialize(); null before that.
@@ -168,7 +172,16 @@ export const Scout = {
     });
     logs.setGlobalLoggerProvider(loggerProvider);
     const core = new ScoutCore(config, platform);
-    await core.bootstrap();
+    if (_pendingUserSampling) {
+      core.setUserSampling(_pendingUserSampling.value);
+      _pendingUserSampling = undefined;
+    }
+    _bootingCore = core;
+    try {
+      await core.bootstrap();
+    } finally {
+      _bootingCore = null;
+    }
     _instance = core;
     // A host that injected its bridge before the page finished booting had
     // its call parked; apply it now, gate included.
@@ -331,6 +344,20 @@ export const Scout = {
   clearUser(): void {
     _instance?.clearUser();
   },
+  /**
+   * Per-user sampling decided by your app, typically from your own remote
+   * config. `true` keeps this user's sessions, `false` drops their spans
+   * (logs and metrics still flow), and `null` falls back to
+   * `sessionSampleRate`. The value applies from the next session start,
+   * never mid-session, and is persisted. A call made before `init()`
+   * completes is held and applied before the first session is decided.
+   */
+  setUserSampling(value: boolean | null): void {
+    const target = _instance ?? _bootingCore;
+    if (target) target.setUserSampling(value);
+    else _pendingUserSampling = { value };
+  },
+
   setAccount(id: string, name?: string): void {
     if (_instance) emitScoutUsageOnce(_instance, 'setAccount');
     _instance?.setAccount(id, name);
@@ -401,6 +428,7 @@ export const Scout = {
     }
     await _instance?.shutdown();
     _instance = null;
+    _pendingUserSampling = undefined;
     _traceGate = null;
   },
 };
