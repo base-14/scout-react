@@ -96,7 +96,7 @@ export class SessionManager {
       id: uuidv4(),
       startedAt: now,
       lastActiveAt: now,
-      sampled: user ?? Math.random() * 100 < this.sampleRate,
+      sampled: user ?? rollPercent() < this.sampleRate,
       samplingSource: user === null ? 'fallback' : 'user',
     };
   }
@@ -202,6 +202,23 @@ export class SessionManager {
     if (!this.current) return;
     await safe(() => this.platform.setItem(STORAGE_KEY, JSON.stringify(this.current)));
   }
+}
+/**
+ * A uniform roll in [0, 100) for the fallback sampling decision. Uses the
+ * platform CSPRNG when present, as the uuid helper does (and as scout-flutter
+ * uses `Random.secure()`), and `Math.random` only on runtimes without
+ * `crypto.getRandomValues`.
+ */
+function rollPercent(): number {
+  const c = (
+    globalThis as { crypto?: { getRandomValues?: (a: Uint32Array) => Uint32Array } }
+  ).crypto;
+  if (c?.getRandomValues) {
+    const buf = new Uint32Array(1);
+    c.getRandomValues(buf);
+    return (buf[0]! / 0x100000000) * 100;
+  }
+  return Math.random() * 100;
 }
 async function safe<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
