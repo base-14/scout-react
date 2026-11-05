@@ -30,7 +30,8 @@ function randomTrainer() {
     const first = pick(TRAINER_FIRST);
     const last = pick(TRAINER_LAST);
     const role = pick(TRAINER_ROLES);
-    const tag = Math.random().toString(36).slice(2, 8);
+    // Demo id only; derived from the clock so no random value flows into user ids.
+    const tag = Date.now().toString(36).slice(-6);
     return {
         id: `trainer-${tag}`,
         name: `${first} ${last}`,
