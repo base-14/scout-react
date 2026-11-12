@@ -46,6 +46,12 @@ export class SessionManager {
    * the `sampleRate` roll decides.
    */
   private pendingUserSampling: boolean | null = null;
+  /**
+   * Set while RUM is disabled (`enabled: false` / `setEnabled(false)`). A
+   * suspended manager holds no session and never creates, resumes, extends or
+   * persists one; `resume()` is the only way out.
+   */
+  private suspended = false;
   constructor(
     private platform: PlatformAdapter,
     opts: {
@@ -69,6 +75,7 @@ export class SessionManager {
     return this.pendingUserSampling;
   }
   async start(): Promise<void> {
+    if (this.suspended) return;
     const raw = await safe(() => this.platform.getItem(STORAGE_KEY));
     if (raw) {
       try {
@@ -101,6 +108,7 @@ export class SessionManager {
     };
   }
   get sessionId(): string | null {
+    if (this.suspended) return null;
     if (
       this.current &&
       this.maxDurationMs > 0 &&
@@ -140,7 +148,7 @@ export class SessionManager {
     return this.isSampled || this.current?.samplingSource === 'user';
   }
   touch(): void {
-    if (!this.current) return;
+    if (this.suspended || !this.current) return;
     this.current.lastActiveAt = Date.now();
     void this.persist();
   }
@@ -154,7 +162,7 @@ export class SessionManager {
     id: string,
     decision?: { sampled?: boolean; samplingSource?: SamplingSource },
   ): void {
-    if (!id) return;
+    if (!id || this.suspended) return;
     const now = Date.now();
     const hostDecided = typeof decision?.sampled === 'boolean';
     const sampled = hostDecided ? (decision!.sampled as boolean) : true;
@@ -180,12 +188,14 @@ export class SessionManager {
     void this.persist();
   }
   async rotate(): Promise<string> {
+    if (this.suspended) return '';
     this.current = this.create();
     await this.persist();
     this.fireRotation();
     return this.current.id;
   }
   async maybeRotateOnResume(): Promise<boolean> {
+    if (this.suspended) return false;
     if (!this.current) {
       await this.start();
       return true;
@@ -198,8 +208,37 @@ export class SessionManager {
     this.touch();
     return false;
   }
+  /** Whether RUM is disabled and no session is held. */
+  get isSuspended(): boolean {
+    return this.suspended;
+  }
+  /**
+   * Enters the disabled state without reading or writing storage, so a launch
+   * that starts disabled leaves any persisted session exactly as it was.
+   */
+  suspend(): void {
+    this.suspended = true;
+    this.current = null;
+  }
+  /**
+   * Ends the current session and enters the disabled state. The persisted
+   * record is removed, so no later launch can resume the ended session.
+   */
+  async end(): Promise<void> {
+    const hadSession = this.current !== null;
+    this.suspend();
+    if (hadSession) await safe(() => this.platform.removeItem(STORAGE_KEY));
+  }
+  /**
+   * Leaves the disabled state with a fresh session, its sampling decided like
+   * any new session's (the pending user value, else the `sampleRate` roll).
+   */
+  async resume(): Promise<string> {
+    this.suspended = false;
+    return this.rotate();
+  }
   private async persist(): Promise<void> {
-    if (!this.current) return;
+    if (this.suspended || !this.current) return;
     await safe(() => this.platform.setItem(STORAGE_KEY, JSON.stringify(this.current)));
   }
 }

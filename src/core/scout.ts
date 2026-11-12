@@ -28,6 +28,7 @@ import type { PlatformAdapter } from './platform';
 import type { Attributes, AttributeValue, SeverityText } from './types';
 import { SCOPE_NAME, SCOPE_VERSION } from './scope';
 import { uuidv4 } from './uuid';
+import { DisabledPeriods, crashHappenedWhileDisabled } from './disabled-periods';
 /**
  * Handle for a span whose lifetime spans an in-flight operation. See
  * {@link Scout.startTrackedSpan}.
@@ -152,6 +153,21 @@ export class Scout {
   private _runtimeAttrs: Attributes = {};
   /** Set once `setUserSampling` runs, so bootstrap hydration never overwrites a newer value. */
   private _userSamplingSetAtRuntime = false;
+  /** The runtime kill switch. Read synchronously by every emit path. */
+  private _enabled: boolean;
+  /** Set once bootstrap has made the session decision; earlier `setEnabled` calls only flip the flag. */
+  private _sessionDecided = false;
+  /** Serialises enable/disable transitions so they never interleave. */
+  private _transition: Promise<void> = Promise.resolve();
+  private _enabledListeners: Array<(enabled: boolean) => void | Promise<void>> = [];
+  private _disabledPeriods: DisabledPeriods;
+  private _breadcrumbsHydrated = false;
+  /**
+   * Wall-clock start of the process, when the platform knows it. A launch
+   * that starts disabled dates its disabled period from here, so a crash
+   * before `initialize()` finished is covered too.
+   */
+  processStartedAtMs: number | null = null;
   constructor(config: ScoutConfig, platform: PlatformAdapter) {
     this._config = resolveConfig(config);
     this.platform = platform;
@@ -164,13 +180,19 @@ export class Scout {
       maxDurationMinutes: this._config.maxSessionDurationMinutes,
     });
     this.breadcrumbs = new BreadcrumbManager(platform);
+    this._enabled = this._config.enabled;
+    this.breadcrumbs.setPaused(!this._enabled);
+    this._disabledPeriods = new DisabledPeriods(platform);
   }
   async bootstrap(): Promise<void> {
     // The decision for a new session is made inside session.start(), so the
     // pending per-user value must be in memory before it runs.
     await this.hydrateUserSampling();
-    await this.session.start();
-    await this.breadcrumbs.hydrate();
+    await this._disabledPeriods.load();
+    this._sessionDecided = true;
+    const decided = this.applyInitialEnabledState();
+    this._transition = decided.catch(() => {});
+    await decided;
     try {
       const KEY = 'scout.anonymous_id';
       let stored = await this.platform.getItem(KEY);
@@ -227,6 +249,96 @@ export class Scout {
     return this._config;
   }
   /**
+   * Enabled: resume-or-create, exactly as before the switch existed. Disabled:
+   * no session is read, created or touched, and the persisted one is left as
+   * it was; the previous session's breadcrumbs stay persisted for a later
+   * enabled launch's crash report.
+   */
+  private async applyInitialEnabledState(): Promise<void> {
+    if (this._enabled) {
+      await this.session.start();
+      await this.hydrateBreadcrumbs();
+      return;
+    }
+    this.session.suspend();
+    await this._disabledPeriods.open(this.processStartedAtMs ?? Date.now());
+    this.debug('enabled=false at init: no session, nothing is exported');
+  }
+  private async hydrateBreadcrumbs(): Promise<void> {
+    if (this._breadcrumbsHydrated) return;
+    this._breadcrumbsHydrated = true;
+    await this.breadcrumbs.hydrate();
+  }
+  /** Whether RUM is running. While false nothing is created, buffered or exported. */
+  get enabled(): boolean {
+    return this._enabled;
+  }
+  /**
+   * The runtime kill switch. Disabling flushes what was recorded while
+   * enabled (via the listeners), then ends the session; from that moment every
+   * signal is dropped, errors included. Enabling always starts a fresh session,
+   * sampled like any new one. Repeating the current value is a no-op.
+   *
+   * Before bootstrap has decided the first session, this only changes the
+   * value that decision uses. The returned promise settles once the
+   * transition (flush, session change) has finished.
+   */
+  setEnabled(value: boolean): Promise<void> {
+    if (typeof value !== 'boolean' || value === this._enabled) return this._transition;
+    this._enabled = value;
+    this.breadcrumbs.setPaused(!value);
+    if (!this._sessionDecided) {
+      this.debug('enabled', value, '(applies at init)');
+      return Promise.resolve();
+    }
+    this.debug('enabled', value);
+    const at = Date.now();
+    const step = value ? () => this.enableNow(at) : () => this.disableNow(at);
+    this._transition = this._transition.then(step, step).catch((e) => {
+      this.debug('setEnabled transition failed', e);
+    });
+    return this._transition;
+  }
+  /**
+   * Registers a callback run on every enable/disable transition. On disable it
+   * runs before the session ends, and a returned promise is awaited, which is
+   * how the exporters get flushed before they close. On enable it runs after
+   * the fresh session has started. Returns an unsubscribe function.
+   */
+  onEnabledChange(listener: (enabled: boolean) => void | Promise<void>): () => void {
+    this._enabledListeners.push(listener);
+    return () => {
+      const i = this._enabledListeners.indexOf(listener);
+      if (i >= 0) this._enabledListeners.splice(i, 1);
+    };
+  }
+  private async notifyEnabledListeners(enabled: boolean): Promise<void> {
+    await Promise.allSettled(this._enabledListeners.slice().map(async (l) => l(enabled)));
+  }
+  private async disableNow(at: number): Promise<void> {
+    // Recorded first: a crash during the flush below is already "while disabled".
+    await this._disabledPeriods.open(at);
+    // Started while enabled, ending after the disable: dropped, not reported.
+    this._activeVitals.clear();
+    this._rootSpan = null;
+    await this.notifyEnabledListeners(false);
+    await this.session.end();
+  }
+  private async enableNow(at: number): Promise<void> {
+    await this._disabledPeriods.close(at);
+    await this.hydrateBreadcrumbs();
+    const id = await this.session.resume();
+    this.debug('enabled: new session', id);
+    await this.notifyEnabledListeners(true);
+  }
+  /**
+   * Whether a pending native crash report was written while RUM was disabled
+   * (this process or an earlier one). Such a report is dropped, never replayed.
+   */
+  crashHappenedWhileDisabled(report: Record<string, unknown>): boolean {
+    return crashHappenedWhileDisabled(report, this._disabledPeriods);
+  }
+  /**
    * Resolves the per-user value in effect at launch: `init ?? stored ?? null`.
    * A non-null init value is persisted, while a null init value means "no
    * opinion" and keeps the stored one. A `setUserSampling` call that arrived
@@ -272,6 +384,9 @@ export class Scout {
     return this.session.pendingUserSamplingValue;
   }
   private rotateIfUserChanged(previous: string | null, next: string | null): void {
+    // While disabled there is no session to rotate; the next enable starts a
+    // fresh one for whoever the user is by then.
+    if (this.session.isSuspended) return;
     const rotate = shouldRotateOnIdentityChange(
       previous,
       next,
@@ -329,6 +444,7 @@ export class Scout {
     if (span) this._viewStartedAt = performance.now();
   }
   startRootSpan(name: string, attributes: Attributes = {}): Span | null {
+    if (!this._enabled) return null;
     const bypassForErrors =
       this._config.alwaysCaptureErrors && ERROR_CLASS_SPANS.has(name);
     if (!bypassForErrors && !this.session.isSampled) return null;
@@ -483,6 +599,7 @@ export class Scout {
     this.emitSpan(name, { ...(attributes ?? {}), ...this.commonAttributes() });
   }
   addBreadcrumb(type: string, message: string): void {
+    // The manager itself drops crumbs while disabled.
     this.breadcrumbs.add(type, message);
   }
   setSessionAttributes(attrs: Attributes): void {
@@ -515,6 +632,7 @@ export class Scout {
     } catch {}
   }
   startVital(name: string, description?: string): void {
+    if (!this._enabled) return;
     this._activeVitals.set(name, { startedAt: performance.now(), description });
   }
   endVital(name: string): void {
@@ -592,6 +710,8 @@ export class Scout {
       category?: string;
     },
   ): void {
+    // The kill switch outranks alwaysCaptureErrors.
+    if (!this._enabled) return;
     const handled = opts?.handled ?? true;
     const { message, stack } = normalizeError(error);
     const truncated = !!(stack && stack.length > MAX_STACK_LEN);
@@ -628,6 +748,7 @@ export class Scout {
     this.breadcrumbs.add(BREADCRUMB_TYPE.ERROR, `manual_error: ${runtimeTypeOf(error)}`);
   }
   reportUncaught(error: unknown): void {
+    if (!this._enabled) return;
     const { message, stack } = normalizeError(error);
     const fingerprint = errorFingerprint('uncaught_error', message, stack);
     // A failure inside our own bundle (web-vitals' `Array.prototype.at` on Chrome < 92,
@@ -708,6 +829,9 @@ export class Scout {
       forceSample?: boolean;
     } = {},
   ): Span | null {
+    // Before every bypass: neither forceSample nor alwaysCaptureErrors
+    // overrides the kill switch.
+    if (!this._enabled) return null;
     const bypassForErrors =
       this._config.alwaysCaptureErrors && ERROR_CLASS_SPANS.has(name);
     if (!opts.forceSample && !bypassForErrors && !this.session.isSampled) {
@@ -768,7 +892,7 @@ export class Scout {
    * that will never be exported, or the backend sees a dangling parent.
    */
   startTrackedSpan(name: string, attributes: Attributes = {}): TrackedSpan | null {
-    if (!this.session.isSampled) return null;
+    if (!this._enabled || !this.session.isSampled) return null;
     const filtered = applyBeforeSend(this._config.beforeSend, 'span', name, attributes);
     if (!filtered) return null;
     let span: Span;
@@ -803,6 +927,9 @@ export class Scout {
             span.setStatus({ code: SpanStatusCode.ERROR });
           }
           span.end();
+          // Disabled since it started: the span processor drops it, and
+          // nothing here may touch the session or the bridge.
+          if (!this._enabled) return;
           this.debug('emit', name, recorded[ATTR.SCREEN_NAME] ?? '(no-screen)');
           this.session.touch();
           this.bumpViewCounter(name, recorded);
@@ -868,7 +995,7 @@ export class Scout {
     return context.with(ctx, () => fn(span));
   }
   startChildSpan(name: string, attributes: Attributes = {}): Span | null {
-    if (!this.session.isSampled) return null;
+    if (!this._enabled || !this.session.isSampled) return null;
     try {
       const parentCtx = this._rootSpan
         ? trace.setSpan(context.active(), this._rootSpan)
@@ -884,7 +1011,7 @@ export class Scout {
     }
   }
   emitHistogram(name: string, value: number, attrs: Attributes = {}): void {
-    if (!this.session.allowsLogsAndMetrics) return;
+    if (!this._enabled || !this.session.allowsLogsAndMetrics) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
       ...this.metricAttributes(),
@@ -905,7 +1032,7 @@ export class Scout {
     }
   }
   emitGauge(name: string, value: number, attrs: Attributes = {}): void {
-    if (!this.session.allowsLogsAndMetrics) return;
+    if (!this._enabled || !this.session.allowsLogsAndMetrics) return;
     const filtered = applyBeforeSend(this._config.beforeSend, 'metric', name, {
       ...attrs,
       ...this.metricAttributes(),
@@ -933,7 +1060,7 @@ export class Scout {
       forceSample?: boolean;
     } = {},
   ): void {
-    if (!this._config.enableLogging) return;
+    if (!this._enabled || !this._config.enableLogging) return;
     const bypassForErrors = this._config.alwaysCaptureErrors && severity === 'ERROR';
     if (!opts.forceSample && !bypassForErrors && !this.session.allowsLogsAndMetrics) {
       return;

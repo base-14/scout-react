@@ -359,4 +359,26 @@ describe('app_unclean_exit from the session marker', () => {
     expect(marker.active).toBe(true);
     expect(typeof marker.lastActiveAt).toBe('string');
   });
+
+  it('disarms the marker when disposed, so a death after RUM is disabled is not reported', async () => {
+    const s = await makeScout();
+    const dispose = installCrashDetector(s);
+    expect(JSON.parse(storage.getItem(MARKER_KEY)!).active).toBe(true);
+    await s.setEnabled(false);
+    dispose();
+    expect(JSON.parse(storage.getItem(MARKER_KEY)!).active).toBe(false);
+    // The next (enabled) load finds a clean marker and reports nothing.
+    recorder.reset();
+    const next = await makeScout();
+    disposers.push(installCrashDetector(next));
+    expect(recorder.spans().some((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT)).toBe(false);
+  });
+
+  it('emits no unclean-exit span while RUM is disabled', async () => {
+    seedCrashedSession({ lastActiveAt: '2026-01-01T00:05:00.000Z' });
+    const s = await makeScout({});
+    await s.setEnabled(false);
+    disposers.push(installCrashDetector(s));
+    expect(recorder.spans().some((sp) => sp.name === SPAN.APP_UNCLEAN_EXIT)).toBe(false);
+  });
 });

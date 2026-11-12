@@ -317,7 +317,47 @@ Scout.setUserSampling(null);  // no opinion: fall back to sessionSampleRate
 - **Persisted.** The latest value is stored, so a load that passes nothing still honours it. A non-null `userSampling` at init wins over the stored value. A `setUserSampling` call made before `initialize()` resolves is held and decides the first session.
 - **User switches.** While user sampling is in play, `clearUser()` (which also resets the value), and `setUser()` with an id different from the previous one, start a new session. On an account switch, call `setUserSampling(newValue)` **before** `setUser(newId)`. Going from anonymous to the first login keeps the current session.
 - **Verify in Scout.** Every span, log and metric carries `session.sampling_source` = `user` | `fallback`.
-- **Not a kill switch.** The SDK keeps running for a "no" user; only their spans stop.
+- **Not a kill switch.** The SDK keeps running for a "no" user; only their spans stop. For that, see the next section.
+
+### Turning RUM off at runtime — `enabled` / `setEnabled`
+
+`enabled: false` is a real kill switch, for apps that must not record at certain times, for example outside working hours. Your app owns the schedule and decides each launch; the SDK does not persist the value.
+
+```ts
+// Your schedule, cached from your backend: on from 1h before the expert's shift starts.
+function isWithinShiftWindow(now = Date.now()): boolean {
+  const s = scheduleCache.read(); // e.g. { startsAt, endsAt } in epoch ms
+  return !!s && now >= s.startsAt - 60 * 60 * 1000 && now < s.endsAt;
+}
+
+// Top level of your entry file, so it runs on every start. On React Native that
+// includes headless JS tasks and background wakes (e.g. a WorkManager job or a
+// background fetch): they load the full bundle, so this init runs off-hours too,
+// and starts disabled instead of counting a session.
+Scout.initialize({ serviceName: 'my-app', endpoint, enabled: isWithinShiftWindow() });
+
+// When the window opens or closes in a running process:
+await Scout.setEnabled(true);  // a fresh session starts
+await Scout.setEnabled(false); // flushes what was recorded, ends the session, then drops everything
+Scout.enabled;                 // current state
+```
+
+While disabled:
+
+- **Nothing leaves the device.** No spans, logs, metrics, errors or crash reports, whatever `alwaysCaptureErrors` says, and no request to the collector at all (the offline buffer is not drained either).
+- **Nothing is kept for later.** Telemetry produced while disabled is discarded, never queued or written to the offline buffer. Breadcrumbs are not recorded.
+- **No session.** Init with `enabled: false` neither creates nor resumes a session, and leaves a persisted one untouched. Lifecycle events do not rotate or touch sessions. `Scout.sessionId` is `null`.
+- **Crashes are not replayed later.** A JS crash, native crash, ANR or OS-recorded exit that happens while disabled is never reported by a later enabled launch. Scout records when it was disabled and drops pending native reports dated inside that time when it drains them. A crash from an earlier *enabled* run is kept until the next enabled point, then reported. iOS MetricKit diagnostics carry only a 24-hour window, so one is dropped if that window overlaps any disabled time; a report with no usable timestamp is reported.
+- **Identity still applies.** `setUser`, attributes and `setUserSampling` calls are kept and take effect once enabled.
+
+Transitions:
+
+- **Enabled → disabled** flushes what was already recorded (best effort), then ends the session. Spans and vitals started before and ending after are dropped.
+- **Disabled → enabled** always starts a **fresh** session, sampled like any new session (`userSampling` if set, else `sessionSampleRate`). Startup metrics are not re-emitted.
+- **Repeating the current value** is a no-op. A `setEnabled` call made before `initialize()` is held and wins over `config.enabled`.
+- With `debug: true`, the init state and each transition are logged (`[scout] enabled false`).
+
+Not covered yet: a WebView page bridged to a native host (`setWebViewBridge`) does not follow the host's switch; call `Scout.setEnabled` in the page too.
 
 ---
 
@@ -361,6 +401,7 @@ await Scout.initialize({
   sessionSampleRate: 1,                      // 0..100, default 1 (1% of sessions)
   alwaysCaptureErrors: true,                 // errors bypass sessionSampleRate (default true)
   sessionTimeoutMinutes: 30,
+  enabled: true,                             // runtime kill switch for this launch; see setEnabled()
 
   // Network
   firstPartyHosts: ['api.example.com', '*.example.com'],

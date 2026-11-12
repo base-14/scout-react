@@ -14,6 +14,7 @@ export function emitScoutConfigLog(scout: Scout): void {
     'applicationId',
     'sessionSampleRate',
     'userSampling',
+    'enabled',
     'sessionTimeoutMinutes',
     'longTaskThresholdMs',
     'anrThresholdMs',

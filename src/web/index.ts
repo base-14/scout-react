@@ -22,6 +22,12 @@ import { resolveConfig, resolveEndpoint, type ScoutConfig } from '../core/config
 import { wrapWithRetry } from '../core/retry-exporter';
 import { GatedSpanExporter } from '../core/gated-span-exporter';
 import { buildOfflineWiring } from '../core/offline-wiring';
+import {
+  EnabledGate,
+  GatedLogRecordProcessor,
+  GatedSpanProcessor,
+  gateExporter,
+} from '../core/enabled-gate';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SCOPE_VERSION } from '../core/scope';
@@ -65,6 +71,8 @@ let _instance: ScoutCore | null = null;
 let _bootingCore: ScoutCore | null = null;
 /** A `setUserSampling` call made before `init()` constructed the core. */
 let _pendingUserSampling: { value: boolean | null } | undefined;
+/** A `setEnabled` call made before `init()` constructed the core; it wins over `config.enabled`. */
+let _pendingEnabled: { value: boolean } | undefined;
 const _disposers: Array<() => void> = [];
 // Closed while a native host relays this page's spans, so the same span is
 // not delivered twice. Assigned during initialize(); null before that.
@@ -101,12 +109,18 @@ export const Scout = {
       [ATTR.SCOUT_REACT_VERSION]: SCOPE_VERSION,
     });
     const headers = resolved.headers ?? {};
+    // The kill switch's pipeline half. Innermost on the exporters, so a closed
+    // gate never reaches the network, the retry layer or the offline buffer.
+    const gate = new EnabledGate(_pendingEnabled?.value ?? resolved.enabled);
     const traceExporter = wrapWithRetry(
-      createOtlpTraceExporter({
-        url: `${endpoint}/v1/traces`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpTraceExporter({
+          url: `${endpoint}/v1/traces`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
@@ -117,22 +131,28 @@ export const Scout = {
     const traceProvider = new WebTracerProvider({
       resource,
       spanProcessors: [
-        new BatchSpanProcessor(gatedTraceExporter, {
-          scheduledDelayMillis: resolved.traceExportIntervalMs,
-          maxQueueSize: resolved.traceMaxQueueSize,
-          maxExportBatchSize: resolved.traceMaxExportBatchSize,
-          exportTimeoutMillis: resolved.exportTimeoutMs,
-        }),
+        new GatedSpanProcessor(
+          new BatchSpanProcessor(gatedTraceExporter, {
+            scheduledDelayMillis: resolved.traceExportIntervalMs,
+            maxQueueSize: resolved.traceMaxQueueSize,
+            maxExportBatchSize: resolved.traceMaxExportBatchSize,
+            exportTimeoutMillis: resolved.exportTimeoutMs,
+          }),
+          gate,
+        ),
       ],
     });
     traceProvider.register();
     trace.setGlobalTracerProvider(traceProvider);
     const metricExporter = wrapWithRetry(
-      createOtlpMetricExporter({
-        url: `${endpoint}/v1/metrics`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpMetricExporter({
+          url: `${endpoint}/v1/metrics`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.metrics, debug: !!resolved.debug, label: 'metrics' },
     );
@@ -151,32 +171,83 @@ export const Scout = {
     });
     metrics.setGlobalMeterProvider(meterProvider);
     const logExporter = wrapWithRetry(
-      createOtlpLogExporter({
-        url: `${endpoint}/v1/logs`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpLogExporter({
+          url: `${endpoint}/v1/logs`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.logs, debug: !!resolved.debug, label: 'logs' },
     );
     const loggerProvider = new LoggerProvider({
       resource,
       processors: [
-        new BatchLogRecordProcessor(logExporter, {
-          scheduledDelayMillis: resolved.logExportScheduledDelayMs,
-          maxQueueSize: resolved.logMaxQueueSize,
-          maxExportBatchSize: resolved.logMaxExportBatchSize,
-          exportTimeoutMillis: resolved.exportTimeoutMs,
-        }),
+        new GatedLogRecordProcessor(
+          new BatchLogRecordProcessor(logExporter, {
+            scheduledDelayMillis: resolved.logExportScheduledDelayMs,
+            maxQueueSize: resolved.logMaxQueueSize,
+            maxExportBatchSize: resolved.logMaxExportBatchSize,
+            exportTimeoutMillis: resolved.exportTimeoutMs,
+          }),
+          gate,
+        ),
       ],
     });
     logs.setGlobalLoggerProvider(loggerProvider);
     const core = new ScoutCore(config, platform);
+    _bootingCore = core;
     if (_pendingUserSampling) {
       core.setUserSampling(_pendingUserSampling.value);
       _pendingUserSampling = undefined;
     }
-    _bootingCore = core;
+    if (_pendingEnabled) {
+      core.setEnabled(_pendingEnabled.value);
+      _pendingEnabled = undefined;
+    }
+    gate.bind(core);
+    gate.setExporting(core.enabled);
+    // The offline buffer POSTs on its own, outside the exporters.
+    const drainOffline = () => {
+      if (gate.exporting) void offline.drainAll(headers);
+    };
+    // The unclean-exit marker is armed only while enabled, so a page that
+    // loads disabled leaves the previous page's marker for a later enabled
+    // load to report.
+    let disposeCrashDetector: (() => void) | null = null;
+    const startCrashDetector = () => {
+      if (disposeCrashDetector || !resolved.enableUncleanExitDetection) return;
+      try {
+        disposeCrashDetector = installCrashDetector(core);
+      } catch (e) {
+        if (resolved.debug)
+          console.warn('[scout] failed to install installCrashDetector', e);
+      }
+    };
+    const stopCrashDetector = () => {
+      const dispose = disposeCrashDetector;
+      disposeCrashDetector = null;
+      dispose?.();
+    };
+    _disposers.push(stopCrashDetector);
+    core.onEnabledChange(async (enabled) => {
+      if (enabled) {
+        gate.setExporting(true);
+        drainOffline();
+        startCrashDetector();
+        return;
+      }
+      // What was recorded while enabled still goes out; then nothing does.
+      await Promise.allSettled([
+        traceProvider.forceFlush(),
+        meterProvider.forceFlush(),
+        loggerProvider.forceFlush(),
+      ]);
+      gate.setExporting(false);
+      stopCrashDetector();
+    });
     try {
       await core.bootstrap();
     } finally {
@@ -199,16 +270,16 @@ export const Scout = {
         }
       )._pendingWebViewBridge = undefined;
     }
-    void offline.drainAll(headers);
+    drainOffline();
     if (typeof document !== 'undefined') {
       const onVisible = () => {
-        if (document.visibilityState === 'visible') void offline.drainAll(headers);
+        if (document.visibilityState === 'visible') drainOffline();
       };
       document.addEventListener('visibilitychange', onVisible);
       _disposers.push(() => document.removeEventListener('visibilitychange', onVisible));
     }
     if (typeof window !== 'undefined') {
-      const onOnline = () => void offline.drainAll(headers);
+      const onOnline = () => drainOffline();
       window.addEventListener('online', onOnline);
       _disposers.push(() => window.removeEventListener('online', onOnline));
     }
@@ -262,8 +333,7 @@ export const Scout = {
     if (resolved.captureConsole)
       mount('installConsoleCapture', () => installConsoleCapture(core));
     mount('installRouteTracker', () => installRouteTracker(core));
-    if (resolved.enableUncleanExitDetection)
-      mount('installCrashDetector', () => installCrashDetector(core));
+    if (core.enabled) startCrashDetector();
     mount('installScrollDepthTracker', () => installScrollDepthTracker(core));
     mount('installPageStateTracker', () => installPageStateTracker(core));
     if (resolved.enableErrorTracking)
@@ -358,6 +428,28 @@ export const Scout = {
     else _pendingUserSampling = { value };
   },
 
+  /**
+   * The runtime kill switch. `false` flushes what was already recorded, ends
+   * the session and then drops everything (errors included) until switched
+   * back on; `true` starts a fresh session. Not persisted: pass `enabled` to
+   * `initialize()` on every load. A call made before `initialize()` is held
+   * and wins over `config.enabled`. Resolves once the transition has finished.
+   */
+  setEnabled(value: boolean): Promise<void> {
+    const target = _instance ?? _bootingCore;
+    if (target) return target.setEnabled(value);
+    if (typeof value === 'boolean') _pendingEnabled = { value };
+    return Promise.resolve();
+  },
+  /**
+   * Whether RUM is switched on. Before `initialize()` it reports a held
+   * `setEnabled` value, else `true`.
+   */
+  get enabled(): boolean {
+    const target = _instance ?? _bootingCore;
+    if (target) return target.enabled;
+    return _pendingEnabled?.value ?? true;
+  },
   setAccount(id: string, name?: string): void {
     if (_instance) emitScoutUsageOnce(_instance, 'setAccount');
     _instance?.setAccount(id, name);
@@ -429,6 +521,7 @@ export const Scout = {
     await _instance?.shutdown();
     _instance = null;
     _pendingUserSampling = undefined;
+    _pendingEnabled = undefined;
     _traceGate = null;
   },
 };

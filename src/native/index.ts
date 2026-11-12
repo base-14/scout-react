@@ -23,6 +23,12 @@ import {
 import type { BreadcrumbManager } from '../core/breadcrumb-manager';
 import { wrapWithRetry } from '../core/retry-exporter';
 import { buildOfflineWiring } from '../core/offline-wiring';
+import {
+  EnabledGate,
+  GatedLogRecordProcessor,
+  GatedSpanProcessor,
+  gateExporter,
+} from '../core/enabled-gate';
 import type { Attributes, AttributeValue } from '../core/types';
 import { ATTR } from '../core/attributes';
 import { SCOPE_VERSION } from '../core/scope';
@@ -69,6 +75,8 @@ let _instance: ScoutCore | null = null;
 let _bootingCore: ScoutCore | null = null;
 /** A `setUserSampling` call made before `init()` constructed the core. */
 let _pendingUserSampling: { value: boolean | null } | undefined;
+/** A `setEnabled` call made before `init()` constructed the core; it wins over `config.enabled`. */
+let _pendingEnabled: { value: boolean } | undefined;
 const _disposers: Array<() => void> = [];
 const _pendingNavigationRefs: any[] = [];
 interface BufferedError {
@@ -147,33 +155,45 @@ export const Scout = {
       [ATTR.SCOUT_REACT_VERSION]: SCOPE_VERSION,
     });
     const headers = resolved.headers ?? {};
+    // The kill switch's pipeline half. Innermost on the exporters, so a closed
+    // gate never reaches the network, the retry layer or the offline buffer.
+    const gate = new EnabledGate(_pendingEnabled?.value ?? resolved.enabled);
     const traceExporter = wrapWithRetry(
-      createOtlpTraceExporter({
-        url: `${endpoint}/v1/traces`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpTraceExporter({
+          url: `${endpoint}/v1/traces`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
     const traceProvider = new BasicTracerProvider({
       resource,
       spanProcessors: [
-        new BatchSpanProcessor(traceExporter, {
-          scheduledDelayMillis: resolved.traceExportIntervalMs,
-          maxQueueSize: resolved.traceMaxQueueSize,
-          maxExportBatchSize: resolved.traceMaxExportBatchSize,
-          exportTimeoutMillis: resolved.exportTimeoutMs,
-        }),
+        new GatedSpanProcessor(
+          new BatchSpanProcessor(traceExporter, {
+            scheduledDelayMillis: resolved.traceExportIntervalMs,
+            maxQueueSize: resolved.traceMaxQueueSize,
+            maxExportBatchSize: resolved.traceMaxExportBatchSize,
+            exportTimeoutMillis: resolved.exportTimeoutMs,
+          }),
+          gate,
+        ),
       ],
     });
     trace.setGlobalTracerProvider(traceProvider);
     const metricExporter = wrapWithRetry(
-      createOtlpMetricExporter({
-        url: `${endpoint}/v1/metrics`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpMetricExporter({
+          url: `${endpoint}/v1/metrics`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.metrics, debug: !!resolved.debug, label: 'metrics' },
     );
@@ -192,47 +212,103 @@ export const Scout = {
     });
     metrics.setGlobalMeterProvider(meterProvider);
     const logExporter = wrapWithRetry(
-      createOtlpLogExporter({
-        url: `${endpoint}/v1/logs`,
-        headers,
-        timeoutMillis: resolved.exportTimeoutMs,
-      }),
+      gateExporter(
+        createOtlpLogExporter({
+          url: `${endpoint}/v1/logs`,
+          headers,
+          timeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
       resolved.exportRetry,
       { ...offline.hooks.logs, debug: !!resolved.debug, label: 'logs' },
     );
     const loggerProvider = new LoggerProvider({
       resource,
       processors: [
-        new BatchLogRecordProcessor(logExporter, {
-          scheduledDelayMillis: resolved.logExportScheduledDelayMs,
-          maxQueueSize: resolved.logMaxQueueSize,
-          maxExportBatchSize: resolved.logMaxExportBatchSize,
-          exportTimeoutMillis: resolved.exportTimeoutMs,
-        }),
+        new GatedLogRecordProcessor(
+          new BatchLogRecordProcessor(logExporter, {
+            scheduledDelayMillis: resolved.logExportScheduledDelayMs,
+            maxQueueSize: resolved.logMaxQueueSize,
+            maxExportBatchSize: resolved.logMaxExportBatchSize,
+            exportTimeoutMillis: resolved.exportTimeoutMs,
+          }),
+          gate,
+        ),
       ],
     });
     logs.setGlobalLoggerProvider(loggerProvider);
     (Scout as any)._providers = { traceProvider, meterProvider, loggerProvider };
     const core = new ScoutCore(config, platform);
+    // From here on, runtime calls reach the core instead of being held.
+    _bootingCore = core;
     if (_pendingUserSampling) {
       core.setUserSampling(_pendingUserSampling.value);
       _pendingUserSampling = undefined;
     }
-    _bootingCore = core;
+    if (_pendingEnabled) {
+      core.setEnabled(_pendingEnabled.value);
+      _pendingEnabled = undefined;
+    }
+    gate.bind(core);
+    gate.setExporting(core.enabled);
+    const nativeStartMs = await readNativeProcessStartMs();
+    core.processStartedAtMs = nativeStartMs;
+    // The offline buffer POSTs on its own, outside the exporters.
+    const drainOffline = () => {
+      if (gate.exporting) void offline.drainAll(headers);
+    };
+    // Both read or arm crash state that must not be touched while disabled:
+    // installed at the first enabled point, so a launch that starts disabled
+    // keeps the previous run's pending reports and marker until then.
+    let disposeCrashDetector: (() => void) | null = null;
+    let crashReaderRan = false;
+    const startCrashCapture = async () => {
+      if (!disposeCrashDetector) {
+        disposeCrashDetector = await installNativeCrashDetector(core);
+        if (!core.enabled) stopCrashCapture();
+      }
+      if (!crashReaderRan && core.enabled) {
+        crashReaderRan = true;
+        void installNativeCrashReader(core);
+      }
+    };
+    const stopCrashCapture = () => {
+      const dispose = disposeCrashDetector;
+      disposeCrashDetector = null;
+      dispose?.();
+    };
+    _disposers.push(stopCrashCapture);
+    core.onEnabledChange(async (enabled) => {
+      if (enabled) {
+        gate.setExporting(true);
+        drainOffline();
+        await startCrashCapture();
+        return;
+      }
+      // What was recorded while enabled still goes out; then nothing does.
+      await Promise.allSettled([
+        traceProvider.forceFlush(),
+        meterProvider.forceFlush(),
+        loggerProvider.forceFlush(),
+      ]);
+      gate.setExporting(false);
+      stopCrashCapture();
+    });
     try {
       await core.bootstrap();
     } finally {
       _bootingCore = null;
     }
     _instance = core;
-    void offline.drainAll(headers);
+    drainOffline();
     if (resolved.enableLifecycleTracking) {
       let lastState: string | undefined;
       try {
         const RN = require('react-native');
         const sub = RN?.AppState?.addEventListener?.('change', (state: string) => {
           if (lastState !== 'active' && state === 'active') {
-            void offline.drainAll(headers);
+            drainOffline();
           }
           lastState = state;
         });
@@ -284,8 +360,7 @@ export const Scout = {
     _disposers.push(installNativeTapTracker(core));
     _disposers.push(installNativeScrollTracker(core));
     _disposers.push(installNativeContextTracker(core));
-    _disposers.push(await installNativeCrashDetector(core));
-    void installNativeCrashReader(core);
+    if (core.enabled) await startCrashCapture();
     _disposers.push(await installUiHangDetector(core, resolved.iosHangThresholdMs));
     try {
       const ExpoModules = withSuppression(() => require('expo-modules-core'));
@@ -325,7 +400,6 @@ export const Scout = {
         });
       }
     } catch {}
-    const nativeStartMs = await readNativeProcessStartMs();
     const coldDurationSec =
       nativeStartMs !== null
         ? (Date.now() - nativeStartMs) / 1000
@@ -454,6 +528,29 @@ export const Scout = {
     else _pendingUserSampling = { value };
   },
 
+  /**
+   * The runtime kill switch. `false` flushes what was already recorded, ends
+   * the session and then drops everything (errors and crashes included) until
+   * switched back on; `true` starts a fresh session. Not persisted: pass
+   * `enabled` to `initialize()` on every launch. A call made before
+   * `initialize()` is held and wins over `config.enabled`. Resolves once the
+   * transition has finished.
+   */
+  setEnabled(value: boolean): Promise<void> {
+    const target = _instance ?? _bootingCore;
+    if (target) return target.setEnabled(value);
+    if (typeof value === 'boolean') _pendingEnabled = { value };
+    return Promise.resolve();
+  },
+  /**
+   * Whether RUM is switched on. Before `initialize()` it reports a held
+   * `setEnabled` value, else `true`.
+   */
+  get enabled(): boolean {
+    const target = _instance ?? _bootingCore;
+    if (target) return target.enabled;
+    return _pendingEnabled?.value ?? true;
+  },
   setSessionAttributes(attrs: Attributes): void {
     _instance?.setSessionAttributes(attrs);
   },
@@ -531,6 +628,7 @@ export const Scout = {
     await _instance?.shutdown();
     _instance = null;
     _pendingUserSampling = undefined;
+    _pendingEnabled = undefined;
   },
 };
 export default Scout;

@@ -103,7 +103,13 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
   const heartbeat = setInterval(() => {
     void writeMarker(foreground);
   }, HEARTBEAT_MS);
-  if (!AppState) return () => clearInterval(heartbeat);
+  // Disposed on a clean stop (shutdown, or RUM being disabled): disarm the
+  // marker, so a later death is not reported as this session's unclean exit.
+  if (!AppState)
+    return () => {
+      clearInterval(heartbeat);
+      void writeMarker(false);
+    };
   const onChange = (state: string) => {
     foreground = state === 'active';
     void writeMarker(foreground);
@@ -111,6 +117,7 @@ export async function installNativeCrashDetector(scout: Scout): Promise<() => vo
   const sub = AppState.addEventListener('change', onChange);
   return () => {
     clearInterval(heartbeat);
+    void writeMarker(false);
     try {
       if (typeof sub?.remove === 'function') sub.remove();
       else AppState.removeEventListener?.('change', onChange);

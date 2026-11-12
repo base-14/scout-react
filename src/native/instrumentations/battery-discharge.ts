@@ -21,7 +21,7 @@ export function installBatteryDischargeTracker(
   }
   let stopped = false;
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || scout.enabled === false) return;
     try {
       const rate = await ScoutCrash!.getBatteryDischargeRate!();
       if (typeof rate === 'number' && isFinite(rate)) {

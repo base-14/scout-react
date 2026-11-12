@@ -31,12 +31,18 @@ export function toAppExitAttributes(
   return out;
 }
 
-export async function installNativeCrashReader(scout: Scout): Promise<void> {
-  let ScoutCrash: ScoutCrashApi | null = null;
-  try {
-    const ExpoModules = withSuppression(() => require('expo-modules-core'));
-    ScoutCrash = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash') ?? null;
-  } catch {}
+/** `module` stands in for the native ScoutCrash module in tests. */
+export async function installNativeCrashReader(
+  scout: Scout,
+  module?: ScoutCrashApi | null,
+): Promise<void> {
+  let ScoutCrash: ScoutCrashApi | null = module ?? null;
+  if (module === undefined) {
+    try {
+      const ExpoModules = withSuppression(() => require('expo-modules-core'));
+      ScoutCrash = ExpoModules?.requireOptionalNativeModule?.('ScoutCrash') ?? null;
+    } catch {}
+  }
   if (!ScoutCrash) return;
   try {
     const reports = await ScoutCrash.getPendingCrashes();
@@ -48,6 +54,9 @@ export async function installNativeCrashReader(scout: Scout): Promise<void> {
     const orphanedJson = scout.breadcrumbsManager.serializeOrphaned();
     const drainProvenance = await collectDrainProvenance();
     for (const report of reports) {
+      // Persisted by the native handlers while RUM was disabled: dropped (and
+      // cleared below with the rest), never replayed.
+      if (scout.crashHappenedWhileDisabled(report)) continue;
       try {
         const attrs: Record<string, string | number | boolean> = {
           [ATTR.CRASH_TYPE]: String(report['crash.type'] ?? 'unknown'),
@@ -155,7 +164,7 @@ async function collectDrainProvenance(): Promise<Record<string, string | number>
   return out;
 }
 
-interface ScoutCrashApi {
+export interface ScoutCrashApi {
   getPendingCrashes(): Promise<Array<Record<string, unknown>>>;
   clearPendingCrashes(): Promise<void>;
   isInstalled(): Promise<boolean>;
