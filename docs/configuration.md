@@ -161,6 +161,7 @@ If you see `QuotaExceededError` in browser telemetry, drop the web caps. On Andr
 | `sessionSampleRate` | `number (0-100)` | `1` | Percent of sessions sampled. Below `100`, full sessions are dropped (not individual events) so you keep coherent session traces. Errors bypass this gate by default — see `alwaysCaptureErrors`. |
 | `alwaysCaptureErrors` | `boolean` | `true` | When `true`, error- and crash-class spans (`error`, `native_crash`, `app_crash`, `anr`) and `ERROR`-severity logs bypass `sessionSampleRate` and are always exported. Set to `false` to subject errors to the same sampling decision as other telemetry. `app_unclean_exit` is not crash-class: it is reported only when the session it describes was itself sampled. |
 | `userSampling` | `boolean \| null` | `null` | Per-user sampling decided by your app (e.g. from your remote config). `true` keeps this user's sessions, `false` drops their spans while logs and metrics still flow, and `null` falls back to `sessionSampleRate`. Applies from the next session start and is persisted; update it at runtime with `Scout.setUserSampling()`. See the README's "User-based sampling". |
+| `enabled` | `boolean` | `true` | Runtime kill switch for this launch. `false` creates no session and exports nothing (errors and crashes included), and buffers nothing for later. Not persisted; flip it at runtime with `Scout.setEnabled()`. See the README's "Turning RUM off at runtime". |
 
 ## Auto-instrumentation toggles
 

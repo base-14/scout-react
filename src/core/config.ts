@@ -83,6 +83,14 @@ export interface ScoutConfig {
    * persisted; see `Scout.setUserSampling`.
    */
   userSampling?: boolean | null;
+  /**
+   * Whether RUM runs at all for this launch (default `true`). `false` is a
+   * kill switch: no session is created or resumed, nothing is exported (errors
+   * and crashes included, whatever `alwaysCaptureErrors` says) and nothing is
+   * buffered for later. Not persisted, so decide it on every launch; flip it
+   * at runtime with `Scout.setEnabled`.
+   */
+  enabled?: boolean;
   firstPartyHosts?: Array<string | RegExp>;
   ignoreUrlPatterns?: RegExp[];
   /**
@@ -242,6 +250,7 @@ export function resolveConfig(config: ScoutConfig): ResolvedConfig {
     maxSessionDurationMinutes: Math.max(0, config.maxSessionDurationMinutes ?? 60),
     alwaysCaptureErrors: config.alwaysCaptureErrors ?? true,
     userSampling: config.userSampling ?? null,
+    enabled: config.enabled !== false,
     firstPartyHosts: config.firstPartyHosts,
     ignoreUrlPatterns: config.ignoreUrlPatterns,
     thirdPartyResources: config.thirdPartyResources ?? 'sanitized',

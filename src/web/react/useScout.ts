@@ -17,6 +17,7 @@ export function useScout() {
       setUser: (id: string, attrs?: Attributes) => Scout.setUser(id, attrs),
       clearUser: () => Scout.clearUser(),
       setUserSampling: (value: boolean | null) => Scout.setUserSampling(value),
+      setEnabled: (value: boolean) => Scout.setEnabled(value),
       logDebug: (m: string, attrs?: Attributes) => Scout.logDebug(m, attrs),
       logInfo: (m: string, attrs?: Attributes) => Scout.logInfo(m, attrs),
       logWarning: (m: string, attrs?: Attributes) => Scout.logWarning(m, attrs),
@@ -26,6 +27,9 @@ export function useScout() {
       },
       get userId() {
         return Scout.userId;
+      },
+      get enabled() {
+        return Scout.enabled;
       },
     }),
     [],

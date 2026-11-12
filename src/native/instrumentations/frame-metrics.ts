@@ -63,7 +63,8 @@ export function installNativeFrameMetricsTracker(
   let currentRoot: unknown = scout.rootSpan;
   const tick = (ts: number) => {
     if (stopped) return;
-    if (!foreground) {
+    // Disabled RUM measures nothing; same fresh baseline as a background stay.
+    if (!foreground || scout.enabled === false) {
       // Do not measure across a background stay; the next foreground frame
       // starts a fresh baseline.
       lastTs = -1;

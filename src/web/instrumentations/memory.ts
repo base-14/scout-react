@@ -13,6 +13,7 @@ export function installMemoryTracker(
   };
   if (!perf.memory) return () => {};
   const tick = () => {
+    if (scout.enabled === false) return;
     try {
       const bytes = perf.memory?.usedJSHeapSize ?? 0;
       scout.emitGauge(METRIC.WEB_MEMORY_USAGE, bytes);

@@ -30,6 +30,11 @@ export function installNativeCpuTracker(
 
   const tick = async () => {
     if (stopped) return;
+    if (scout.enabled === false) {
+      // A delta must never span time RUM was off.
+      lastTicks = null;
+      return;
+    }
     try {
       const screen = getCurrentScreen();
       const attrs: Attributes = screen ? { 'screen.name': screen } : {};

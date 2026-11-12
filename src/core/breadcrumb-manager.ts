@@ -6,7 +6,12 @@ export class BreadcrumbManager {
   private buffer: Breadcrumb[] = [];
   private orphanedCrumbs: Breadcrumb[] = [];
   private nativeSink: ((json: string) => void) | null = null;
+  /** True while RUM is disabled: a crumb then would ride along on a later report. */
+  private paused = false;
   constructor(private platform: PlatformAdapter) {}
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+  }
   setNativeSink(sink: ((json: string) => void) | null): void {
     this.nativeSink = sink;
     if (sink) {
@@ -51,6 +56,7 @@ export class BreadcrumbManager {
     return this.orphanedCrumbs.length ? JSON.stringify(this.orphanedCrumbs) : null;
   }
   add(type: string, message: string): void {
+    if (this.paused) return;
     const crumb: Breadcrumb = {
       type,
       message,

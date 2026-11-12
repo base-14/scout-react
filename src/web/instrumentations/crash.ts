@@ -148,8 +148,11 @@ export function installCrashDetector(scout: Scout): () => void {
   document.addEventListener('visibilitychange', onVisibility);
   document.addEventListener('freeze', onFreeze);
   document.addEventListener('resume', onVisibility);
+  // Disposed on a clean stop (shutdown, or RUM being disabled): disarm the
+  // marker, so a later death is not reported as this session's unclean exit.
   return () => {
     clearInterval(screenInterval);
+    writeMarker(false);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('beforeunload', onBeforeUnload);
     document.removeEventListener('visibilitychange', onVisibility);

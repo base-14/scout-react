@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime kill switch: `enabled` / `Scout.setEnabled()` / `Scout.enabled`.**
+  `setUserSampling(false)` only drops spans, from the next session on. An app
+  that must not record at certain times (outside working hours, say) can now
+  pass `enabled: false` to `initialize()` and flip `Scout.setEnabled()` at
+  runtime in the same process. While disabled no session is created, resumed
+  or extended, and nothing is exported or buffered: no spans, logs, metrics,
+  errors or crash reports (overriding `alwaysCaptureErrors`), and no request to
+  the collector at all. Disabling flushes what was already recorded, then ends
+  the session; enabling always starts a fresh, normally sampled session. The
+  value is not persisted, and a call made before `initialize()` is held and
+  wins over the config value. Also on `useScout()`.
+- Crashes that happen while disabled are never reported by a later launch.
+  The native handlers persist reports on their own, so Scout records when it
+  was disabled (`scout.disabled_periods`, written only once the switch is
+  used) and drops pending reports dated inside those periods at drain time. A
+  crash from an earlier enabled run is kept until the next enabled point.
+  iOS MetricKit diagnostics, which carry only a 24-hour window, are dropped
+  when that window overlaps disabled time. The unclean-exit marker is armed
+  only while enabled and disarmed on disable or shutdown.
+
+### Follow-ups
+
+- A WebView page bridged with `setWebViewBridge` does not follow the native
+  host's switch yet; call `Scout.setEnabled` in the page as well.
+
 ## [0.1.22] - 2026-11-05
 
 ### Added

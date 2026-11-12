@@ -12,6 +12,7 @@ export function installNativeMemoryTracker(
 ): () => void {
   if (!DeviceInfo?.getUsedMemory) return () => {};
   const tick = () => {
+    if (scout.enabled === false) return;
     DeviceInfo.getUsedMemory()
       .then((bytes: number) => {
         if (typeof bytes === 'number' && bytes >= 0) {
