@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-11-13
+
 ### Added
 
 - **Runtime kill switch: `enabled` / `Scout.setEnabled()` / `Scout.enabled`.**
@@ -1154,7 +1156,8 @@ Initial release.
   require a native crash module. JS-fatal errors still flow through
   `ErrorUtils` → `error.handled=false`.
 
-[Unreleased]: https://github.com/base-14/scout-react/compare/v0.1.22...HEAD
+[Unreleased]: https://github.com/base-14/scout-react/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/base-14/scout-react/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/base-14/scout-react/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/base-14/scout-react/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/base-14/scout-react/compare/v0.1.19...v0.1.20
