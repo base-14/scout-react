@@ -180,8 +180,24 @@ describe('runtime kill switch against a dummy OTLP collector (web)', () => {
     Scout.instance?.emitHistogram('kill_switch.histogram', 1);
   }
 
+  /** Wait until no request has arrived for `quietMs`, so exports already in flight land first. */
+  async function settle(quietMs = 200) {
+    let seen = collector.requests;
+    let since = performance.now();
+    await until('collector to go quiet', () => {
+      if (collector.requests !== seen) {
+        seen = collector.requests;
+        since = performance.now();
+      }
+      return performance.now() - since >= quietMs;
+    });
+  }
+
   /** Activity, a flush, and a quiet period several export intervals long: nothing may arrive. */
   async function expectSilence(Scout: any, marker: string) {
+    // A periodic export started while still enabled may land just after the
+    // disable; it carries pre-disable telemetry, so let it arrive first.
+    await settle();
     const before = collector.requests;
     activity(Scout, marker);
     await Scout.flush();
