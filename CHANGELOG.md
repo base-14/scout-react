@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-11-17
+
+### Fixed
+
+- **Android: the native crash handler now supports 16 KB memory pages.**
+  `libscout_signal_handler.so` is compiled in the app's own build, and with
+  NDK r27 (the React Native default) it was linked with 4 KB page alignment,
+  so Google Play rejected apps targeting Android 15+ with "Your app does not
+  support 16 KB memory page sizes". It is now linked with
+  `-z max-page-size=16384` on every NDK version.
+
 ## [0.1.23] - 2026-11-13
 
 ### Added
@@ -1156,7 +1167,8 @@ Initial release.
   require a native crash module. JS-fatal errors still flow through
   `ErrorUtils` → `error.handled=false`.
 
-[Unreleased]: https://github.com/base-14/scout-react/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/base-14/scout-react/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/base-14/scout-react/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/base-14/scout-react/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/base-14/scout-react/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/base-14/scout-react/compare/v0.1.20...v0.1.21
