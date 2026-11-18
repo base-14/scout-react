@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Android: uncaught Java/Kotlin exceptions are reported as
+  `crash.type = "jvm_exception"`** (was `uncaught_exception`), the value the
+  RUM semantics spec defines and the Flutter SDK already sends. Scout RUM
+  offers ProGuard/R8 de-obfuscation of the Java stack trace for this value, so
+  apps that upload their `mapping.txt` get readable JVM crashes. Dashboards or
+  alerts that filtered on `crash.type = 'uncaught_exception'` for Android need
+  updating. iOS is unchanged.
+
 ## [0.1.24] - 2026-11-17
 
 ### Fixed
