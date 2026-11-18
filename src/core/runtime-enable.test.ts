@@ -409,7 +409,7 @@ describe('runtime enable: crashes while disabled are never replayed', () => {
     // The process dies while disabled (open period), the next launch is enabled.
     const s2 = await makeScout({}, platform);
     const mod = fakeCrashModule([
-      { 'crash.type': 'uncaught_exception', 'crash.timestamp': String(whileDisabled) },
+      { 'crash.type': 'jvm_exception', 'crash.timestamp': String(whileDisabled) },
       {
         'crash.type': 'signal',
         'crash.timestamp': new Date(beforeDisable).toISOString(),
@@ -444,7 +444,7 @@ describe('runtime enable: crashes while disabled are never replayed', () => {
     const s2 = await makeScout({}, platform);
     const mod = fakeCrashModule([
       {
-        'crash.type': 'uncaught_exception',
+        'crash.type': 'jvm_exception',
         'crash.timestamp': String(Date.now() - 1000),
       },
     ]);
@@ -458,7 +458,7 @@ describe('runtime enable: crashes while disabled are never replayed', () => {
     const crashAt = Date.now() - 1000;
     const s2 = await makeScout({ enabled: false }, platform);
     const mod = fakeCrashModule([
-      { 'crash.type': 'uncaught_exception', 'crash.timestamp': String(crashAt) },
+      { 'crash.type': 'jvm_exception', 'crash.timestamp': String(crashAt) },
     ]);
     // Even if something drained while disabled, nothing would be emitted…
     expect(s2.crashHappenedWhileDisabled(mod.pending[0]!)).toBe(false);

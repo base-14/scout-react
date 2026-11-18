@@ -649,7 +649,9 @@ private object ScoutCrashInstaller {
     val sw = StringWriter()
     throwable.printStackTrace(PrintWriter(sw))
     val obj = JSONObject().apply {
-      put("crash.type", "uncaught_exception")
+      // "jvm_exception" is the RUM semantics value for an uncaught Java/Kotlin
+      // exception; the RUM crash view keys ProGuard/R8 symbolication off it.
+      put("crash.type", "jvm_exception")
       put("crash.reason", throwable.message ?: throwable.javaClass.simpleName)
       put("crash.nsexception_name", throwable.javaClass.name)
       put("crash.stack_trace", sw.toString())
