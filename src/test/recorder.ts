@@ -5,7 +5,9 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   type ReadableSpan,
+  type SpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
+import type { Resource } from '@opentelemetry/resources';
 import {
   InMemoryLogRecordExporter,
   LoggerProvider,
@@ -24,14 +26,18 @@ export interface Recorder {
   logs(): ReadableLogRecord[];
   metrics(): Promise<ResourceMetrics[]>;
   reset(): void;
+  /** The span pipeline, so a test can attach another provider to it. */
+  spanProcessors: SpanProcessor[];
 }
-export function makeRecorder(): Recorder {
+export function makeRecorder(opts: { resource?: Resource } = {}): Recorder {
   trace.disable();
   metrics.disable();
   logs.disable();
   const spanExporter = new InMemorySpanExporter();
+  const spanProcessors: SpanProcessor[] = [new SimpleSpanProcessor(spanExporter)];
   const traceProvider = new BasicTracerProvider({
-    spanProcessors: [new SimpleSpanProcessor(spanExporter)],
+    ...(opts.resource ? { resource: opts.resource } : {}),
+    spanProcessors,
   });
   trace.setGlobalTracerProvider(traceProvider);
   const logExporter = new InMemoryLogRecordExporter();
@@ -50,6 +56,7 @@ export function makeRecorder(): Recorder {
   });
   metrics.setGlobalMeterProvider(meterProvider);
   return {
+    spanProcessors,
     spans: () => spanExporter.getFinishedSpans(),
     logs: () => logExporter.getFinishedLogRecords(),
     metrics: async () => {

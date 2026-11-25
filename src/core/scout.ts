@@ -1,4 +1,5 @@
 import {
+  ROOT_CONTEXT,
   context,
   trace,
   metrics,
@@ -28,6 +29,7 @@ import type { PlatformAdapter } from './platform';
 import type { Attributes, AttributeValue, SeverityText } from './types';
 import { SCOPE_NAME, SCOPE_VERSION } from './scope';
 import { uuidv4 } from './uuid';
+import type { Release, ReleaseTracers } from './release-tracers';
 import { DisabledPeriods, crashHappenedWhileDisabled } from './disabled-periods';
 /**
  * Handle for a span whose lifetime spans an in-flight operation. See
@@ -168,8 +170,11 @@ export class Scout {
    * before `initialize()` finished is covered too.
    */
   processStartedAtMs: number | null = null;
+  private readonly _serviceVersionIsExplicit: boolean;
+  private _releaseTracers: ReleaseTracers | null = null;
   constructor(config: ScoutConfig, platform: PlatformAdapter) {
     this._config = resolveConfig(config);
+    this._serviceVersionIsExplicit = config.serviceVersion !== undefined;
     this.platform = platform;
     this.tracer = trace.getTracer(SCOPE_NAME, SCOPE_VERSION);
     this.meter = metrics.getMeter(SCOPE_NAME, SCOPE_VERSION);
@@ -409,6 +414,15 @@ export class Scout {
   }
   get connectionType(): string {
     return this._connectionType;
+  }
+  /**
+   * Lets `emitSpan` label a span with the release named in `opts.release`.
+   * Ignored when the app set `serviceVersion` itself: that label is the
+   * app's, not one the SDK derived from the app's metadata.
+   */
+  useReleaseTracers(tracers: ReleaseTracers): void {
+    if (this._serviceVersionIsExplicit) return;
+    this._releaseTracers = tracers;
   }
   get otelTracer(): Tracer {
     return this.tracer;
@@ -827,6 +841,8 @@ export class Scout {
       startTime?: number;
       endTime?: number;
       forceSample?: boolean;
+      /** The release the event happened in, when it isn't the running one. */
+      release?: Release;
     } = {},
   ): Span | null {
     // Before every bypass: neither forceSample nor alwaysCaptureErrors
@@ -844,11 +860,15 @@ export class Scout {
     if (!filtered) return null;
     let span: Span;
     try {
-      const parentCtx =
-        this._rootSpan && this._rootSpan !== this._rootSpanSentinel
+      const releaseTracer = opts.release ? this._releaseTracers?.(opts.release) : null;
+      // An event from another release doesn't belong in this launch's trace.
+      const parentCtx = releaseTracer
+        ? ROOT_CONTEXT
+        : this._rootSpan && this._rootSpan !== this._rootSpanSentinel
           ? trace.setSpan(context.active(), this._rootSpan)
           : context.active();
-      span = this.tracer.startSpan(
+      const tracer = releaseTracer ?? this.tracer;
+      span = tracer.startSpan(
         name,
         {
           startTime: opts.startTime,
