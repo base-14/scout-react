@@ -50,6 +50,14 @@ object ScoutNdkSignalHandler {
     }
   }
 
+  fun setAppBuildIfLoaded(build: String) {
+    if (!loaded) return
+    try {
+      setAppBuild(build)
+    } catch (_: Throwable) {
+    }
+  }
+
   fun setBuildFingerprintIfLoaded(fingerprint: String) {
     if (!loaded) return
     try {
@@ -200,4 +208,7 @@ object ScoutNdkSignalHandler {
 
   @JvmStatic
   external fun setBuildFingerprint(fingerprint: String)
+
+  @JvmStatic
+  external fun setAppBuild(build: String)
 }

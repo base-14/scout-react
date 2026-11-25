@@ -44,6 +44,7 @@ static char g_model[SCOUT_MAX_FIELD] = {0};
 static char g_os_version[SCOUT_MAX_FIELD] = {0};
 static char g_os_build[SCOUT_MAX_FIELD] = {0};
 static char g_bundle_version[SCOUT_MAX_FIELD] = {0};
+static char g_app_build[SCOUT_MAX_FIELD] = {0};
 static char g_package_name[SCOUT_MAX_FIELD] = {0};
 static char g_app_name[SCOUT_MAX_FIELD] = {0};
 static char g_build_type[SCOUT_MAX_FIELD] = {0};
@@ -740,6 +741,7 @@ static void scout_signal_action(int sig, siginfo_t *info, void *uap) {
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.application_version", g_bundle_version);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.app_version", g_bundle_version);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.bundle_version", g_bundle_version);
+  bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.application_build_version", g_app_build);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.bundle_id", g_package_name);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.app_name", g_app_name);
   bpos = append_quoted_field(buf, bpos, sizeof(buf), "crash.process_name", g_process_name);
@@ -1014,3 +1016,10 @@ Java_io_base14_scoutreact_ScoutNdkSignalHandler_setBuildFingerprint(
   copy_jstring_field(env, fingerprint, g_build_fingerprint, sizeof(g_build_fingerprint));
 }
 
+/* The app's versionCode, formatted as the running app reports app.build. */
+JNIEXPORT void JNICALL
+Java_io_base14_scoutreact_ScoutNdkSignalHandler_setAppBuild(
+    JNIEnv *env, jclass cls, jstring build) {
+  (void)cls;
+  copy_jstring_field(env, build, g_app_build, sizeof(g_app_build));
+}
