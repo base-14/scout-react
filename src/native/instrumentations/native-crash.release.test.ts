@@ -269,6 +269,58 @@ describe('crash replayed under the release that crashed', () => {
   });
 });
 
+// The release keys each native writer stamps on its report (see
+// ios/ScoutSignalHandler.m, ios/ScoutKSCrashIntegration.swift,
+// android/src/main/cpp/scout_signal_handler.c and ScoutCrashModule.kt).
+describe('every crash writer names the release that crashed', () => {
+  let rec: Recorder;
+  const resource = resourceFromAttributes(RUNNING);
+  beforeEach(() => {
+    rec = makeRecorder({ resource });
+  });
+  const older = {
+    'crash.app_version': '0.9.0',
+    'crash.application_version': '0.9.0',
+    'crash.application_build_version': '0',
+  };
+  const writers: Array<[string, Report]> = [
+    [
+      'iOS signal handler',
+      { 'crash.type': 'signal', 'crash.signal': 'SIGSEGV', ...older },
+    ],
+    [
+      'iOS KSCrash',
+      { 'crash.type': 'kscrash', 'crash.report_type': 'kscrash', ...older },
+    ],
+    [
+      'Android NDK signal handler',
+      {
+        'crash.type': 'native_crash',
+        'crash.report_type': 'native_signal',
+        'crash.bundle_version': '0.9.0',
+        ...older,
+      },
+    ],
+    ['Android uncaught JVM exception', { 'crash.type': 'uncaught_exception', ...older }],
+    [
+      'Android ApplicationExitInfo',
+      { 'crash.type': 'native_crash', 'crash.source': 'exit_info', ...older },
+    ],
+  ];
+
+  it.each(writers)('%s', async (_name, report) => {
+    const s = await makeScout();
+    s.useReleaseTracers(createReleaseTracers(resource, rec.spanProcessors));
+    await installNativeCrashReader(
+      s,
+      fakeCrashModule([{ 'crash.timestamp': iso(Date.now() - HOUR), ...report }]),
+    );
+    const [span] = rec.spans().filter((x) => x.name === SPAN.NATIVE_CRASH);
+    expect(span!.resource.attributes['service.version']).toBe('0.9.0+0');
+    expect(span!.resource.attributes[ATTR.APP_BUILD]).toBe('0');
+  });
+});
+
 describe('running app without a build number', () => {
   let rec: Recorder;
   const resource = resourceFromAttributes({

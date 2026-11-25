@@ -46,7 +46,9 @@ export function toAppExitAttributes(
 
 /**
  * The release a report was written by, when it names both its version and
- * build (the iOS signal-handler and Android reports carry no build).
+ * build. Every native writer records both for the process that crashed; an
+ * Android exit record leaves them out when that process's release is not
+ * known for certain, and reports from older SDK versions may lack the build.
  */
 export function releaseOfCrash(report: Record<string, unknown>): Release | null {
   const version = report['crash.app_version'] ?? report['crash.application_version'];

@@ -308,6 +308,9 @@ private object ScoutNativeContextPusher {
     val pkg = ctx.packageName ?: ""
     val info = try { pm.getPackageInfo(pkg, 0) } catch (_: Throwable) { null }
     val bundleVer = info?.versionName ?: ""
+    // The build (versionCode) goes with the version so a native crash replayed
+    // after an update is counted under the release that crashed.
+    ScoutAppRelease.current(ctx)?.let { ScoutNdkSignalHandler.setAppBuildIfLoaded(it.build) }
     val osVer = Build.VERSION.RELEASE ?: ""
     val osBuild = Build.DISPLAY ?: Build.ID ?: ""
     val model = Build.MODEL ?: ""
@@ -433,6 +436,7 @@ private object ScoutNativeContextPusher {
 private object ScoutExitInfoCollector {
   private const val PREFS = "scout_exit_info"
   private const val KEY_LAST_TIMESTAMP = "last_timestamp"
+  private const val KEY_PROCESS_RELEASES = "process_releases"
   @Volatile var maxTombstoneBytes: Int = 131072
 
   fun drain(ctx: Context, dir: File) {
@@ -441,11 +445,14 @@ private object ScoutExitInfoCollector {
       ?: return
     val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val lastTs = prefs.getLong(KEY_LAST_TIMESTAMP, 0L)
+    val processReleases = ScoutProcessReleases.decode(prefs.getString(KEY_PROCESS_RELEASES, null))
+    recordThisProcess(ctx, prefs, processReleases)
     val infos = try {
       am.getHistoricalProcessExitReasons(null, 0, 50)
     } catch (_: Throwable) {
       return
     }
+    val deaths = infos.map { ScoutProcessReleases.Death(it.pid, it.timestamp) }
     // First launch with no watermark (fresh install, or an upgrade from an
     // SDK that kept none): the OS history predates this SDK. Nothing in it
     // can be attributed to a session we know about, and dumping up to 50 old
@@ -469,7 +476,14 @@ private object ScoutExitInfoCollector {
       val exitReason = if (crashType == null) ScoutExitInfoClassifier.exitReasonFor(reason) else null
       if (crashType == null && exitReason == null) continue
       try {
-        writeReport(dir, info, crashType ?: exitReason!!, isExit = crashType == null)
+        val release = ScoutProcessReleases.releaseFor(
+          processReleases,
+          info.pid,
+          info.processName ?: "",
+          info.timestamp,
+          deaths,
+        )
+        writeReport(dir, info, crashType ?: exitReason!!, isExit = crashType == null, release = release)
       } catch (_: Throwable) {
 
       }
@@ -479,11 +493,39 @@ private object ScoutExitInfoCollector {
     }
   }
 
+  /**
+   * Remembers which release this process runs, keyed by pid, name and start
+   * time, so the exit record the OS writes when it dies can be matched back to
+   * it on a later launch (possibly by a newer release). Committed
+   * synchronously: a process that crashes right after start must still leave
+   * its record behind.
+   */
+  private fun recordThisProcess(
+    ctx: Context,
+    prefs: SharedPreferences,
+    known: List<ScoutProcessRelease>,
+  ) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    try {
+      val release = ScoutAppRelease.current(ctx) ?: return
+      val name = Application.getProcessName() ?: return
+      val startMs = System.currentTimeMillis() - SystemClock.uptimeMillis() +
+        Process.getStartUptimeMillis()
+      val updated = ScoutProcessReleases.record(
+        known,
+        ScoutProcessRelease(Process.myPid(), name, startMs, release),
+      )
+      prefs.edit().putString(KEY_PROCESS_RELEASES, ScoutProcessReleases.encode(updated)).commit()
+    } catch (_: Throwable) {
+    }
+  }
+
   private fun writeReport(
     dir: File,
     info: ApplicationExitInfo,
     crashType: String,
     isExit: Boolean = false,
+    release: ScoutRelease? = null,
   ) {
     val obj = JSONObject().apply {
       // Same `crash.*` shape for both; the JS side renames to `exit.*` and
@@ -511,6 +553,8 @@ private object ScoutExitInfoCollector {
       put("crash.pss_kb", info.pss)
       put("crash.rss_kb", info.rss)
       put("crash.reason", info.description ?: "")
+      // Only when the dead process recorded its own release; otherwise unset.
+      for ((k, v) in ScoutCrashRelease.attributes(release)) put(k, v)
       
       
       val trace = try {
@@ -604,6 +648,9 @@ private object ScoutAccessibilityQueries {
 private object ScoutCrashInstaller {
   @Volatile var isInstalled: Boolean = false
   private var crashDir: File? = null
+  // Read once at install: the uncaught-exception path must not depend on the
+  // PackageManager while the process is dying.
+  private var release: ScoutRelease? = null
   private var previousHandler: Thread.UncaughtExceptionHandler? = null
 
   @Synchronized
@@ -611,6 +658,7 @@ private object ScoutCrashInstaller {
     if (isInstalled) return
     val dir = File(context.filesDir, "scout-crash/pending").apply { mkdirs() }
     crashDir = dir
+    release = ScoutAppRelease.current(context)
 
     previousHandler = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -655,6 +703,7 @@ private object ScoutCrashInstaller {
       put("crash.stack_trace", sw.toString())
       put("crash.thread", thread.name ?: "unknown")
       put("crash.timestamp", System.currentTimeMillis().toString())
+      for ((k, v) in ScoutCrashRelease.attributes(release)) put(k, v)
     }
     val out = File(dir, "java_${System.currentTimeMillis()}_${Thread.currentThread().id}.json")
     out.writeText(obj.toString())
@@ -686,5 +735,28 @@ private object ScoutCrashInstaller {
       }
     }
     return list
+  }
+}
+
+/** This process's release, as the running app reports it in `app.version` / `app.build`. */
+internal object ScoutAppRelease {
+  @Volatile private var cached: ScoutRelease? = null
+
+  fun current(ctx: Context): ScoutRelease? {
+    cached?.let { return it }
+    val release = try {
+      val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+      val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.longVersionCode
+      } else {
+        @Suppress("DEPRECATION")
+        info.versionCode.toLong()
+      }
+      ScoutCrashRelease.of(info.versionName, code)
+    } catch (_: Throwable) {
+      null
+    }
+    cached = release
+    return release
   }
 }

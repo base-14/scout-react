@@ -40,9 +40,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `beforeSend`, retries, offline buffer). Applies only when the SDK derived
   `service.version` from the app's metadata, not when `serviceVersion` is set
   in the config, and when the running app has a build number. Reports
-  without a build (the iOS signal handler, Android) keep the running release.
+  without a build keep the running release.
   Such a span starts its own trace instead of sitting inside the current
   launch's trace.
+- **Every crash writer records the release that crashed.** The release
+  correction above needs a report to name its own version and build; the
+  Android writers recorded only the version, or neither, so their crashes
+  were still counted under the release that delivered them. Reports now carry
+  `crash.app_version`, `crash.application_version` and
+  `crash.application_build_version` of the process that crashed, with the
+  build in the same format as the running app's `app.build`:
+  - Android NDK signal handler: adds the build (`versionCode`, cached at
+    install like the version, written by the handler without allocating).
+  - Android uncaught JVM exceptions: version and build, read once at install.
+  - Android `ApplicationExitInfo` (`jvm_crash`, `native_crash`, `anr`,
+    `app_exit`): each process records its pid, name, start time and release
+    when the SDK starts, and an exit record gets the release of the process
+    it describes. Exits with no record of their own (a process that died
+    before the SDK started, or history from before this version) keep the
+    running release instead of guessing.
+  - iOS: KSCrash reports also set `crash.app_version`; the bundled signal
+    handler and NSException writer (not installed, KSCrash handles both)
+    record version and build too.
 
 ## [0.1.24] - 2026-11-17
 

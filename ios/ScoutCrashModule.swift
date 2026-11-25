@@ -429,7 +429,7 @@ private final class ScoutCrashInstaller {
       "crash.stack_trace": exception.callStackSymbols.joined(separator: "\n"),
       "crash.thread": String(pthread_mach_thread_np(pthread_self())),
       "crash.timestamp": ISO8601DateFormatter().string(from: Date()),
-    ]
+    ].merging(ScoutAppRelease.attributes) { current, _ in current }
     let filename = String(format: "ns_%@_%.0f.json",
                           UUID().uuidString,
                           Date().timeIntervalSince1970 * 1000)
@@ -459,4 +459,22 @@ private final class ScoutCrashInstaller {
   static func crashDirURL() -> URL? {
     return crashDir()
   }
+}
+
+/// This process's release, keyed the way the KSCrash and MetricKit writers
+/// key it, so a report replayed after an update is counted under the release
+/// that crashed.
+enum ScoutAppRelease {
+  static let attributes: [String: Any] = {
+    let info = Bundle.main.infoDictionary ?? [:]
+    var out: [String: Any] = [:]
+    if let version = info["CFBundleShortVersionString"] as? String, !version.isEmpty {
+      out["crash.app_version"] = version
+      out["crash.application_version"] = version
+    }
+    if let build = info["CFBundleVersion"] as? String, !build.isEmpty {
+      out["crash.application_build_version"] = build
+    }
+    return out
+  }()
 }

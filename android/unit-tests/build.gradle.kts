@@ -20,6 +20,7 @@ sourceSets {
       include(
         "io/base14/scoutreact/ScoutExitInfoClassifier.kt",
         "io/base14/scoutreact/ScoutHangDetector.kt",
+        "io/base14/scoutreact/ScoutCrashRelease.kt",
       )
     }
   }

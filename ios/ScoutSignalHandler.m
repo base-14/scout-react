@@ -10,6 +10,7 @@
 
 #define SCOUT_MAX_PATH 1024
 #define SCOUT_NUM_SIGNALS 6
+#define SCOUT_MAX_FIELD 256
 
 static char g_crashDirPath[SCOUT_MAX_PATH] = {0};
 static struct sigaction g_oldActions[SCOUT_NUM_SIGNALS];
@@ -20,6 +21,10 @@ static const char *const g_signalNames[SCOUT_NUM_SIGNALS] = {
     "SIGSEGV", "SIGABRT", "SIGBUS", "SIGILL", "SIGFPE", "SIGTRAP"
 };
 static volatile int g_installed = 0;
+/* The release of this process (CFBundleShortVersionString / CFBundleVersion),
+   JSON-escaped at install time so the handler only copies bytes. */
+static char g_appVersion[SCOUT_MAX_FIELD] = {0};
+static char g_appBuild[SCOUT_MAX_FIELD] = {0};
 
 static void writeAllFd(int fd, const char *buf, size_t len) {
   while (len > 0) {
@@ -66,6 +71,40 @@ static void writeHex64(int fd, uint64_t v) {
     buf[2 + i] = (nibble < 10) ? (char)('0' + nibble) : (char)('a' + nibble - 10);
   }
   writeAllFd(fd, buf, sizeof(buf));
+}
+
+static void writeStrField(int fd, const char *key, const char *value) {
+  if (value[0] == 0) return;
+  writeStr(fd, ",\"");
+  writeStr(fd, key);
+  writeStr(fd, "\":\"");
+  writeStr(fd, value);
+  writeStr(fd, "\"");
+}
+
+/* Not called from the handler: copies `src` into `dst` as a JSON string body,
+   dropping control characters, never cutting an escape in half. */
+static void copyJsonEscaped(const char *src, char *dst, size_t cap) {
+  size_t o = 0;
+  if (src != NULL) {
+    for (const char *p = src; *p && o + 2 < cap; p++) {
+      char c = *p;
+      if ((unsigned char)c < 0x20) continue;
+      if (c == '"' || c == '\\') dst[o++] = '\\';
+      dst[o++] = c;
+    }
+  }
+  dst[o] = 0;
+}
+
+static void captureRelease(void) {
+  NSDictionary *info = [[NSBundle mainBundle] infoDictionary];
+  id version = info[@"CFBundleShortVersionString"];
+  id build = info[@"CFBundleVersion"];
+  copyJsonEscaped([version isKindOfClass:[NSString class]] ? [version UTF8String] : NULL,
+                  g_appVersion, sizeof(g_appVersion));
+  copyJsonEscaped([build isKindOfClass:[NSString class]] ? [build UTF8String] : NULL,
+                  g_appBuild, sizeof(g_appBuild));
 }
 
 static const char *signalNameFor(int sig) {
@@ -137,7 +176,11 @@ static void scoutSignalHandler(int sig, siginfo_t *info, void *uap) {
   } else {
     writeStr(fd, "0");
   }
-  writeStr(fd, "\",\"crash.stack_trace\":\"");
+  writeStr(fd, "\"");
+  writeStrField(fd, "crash.app_version", g_appVersion);
+  writeStrField(fd, "crash.application_version", g_appVersion);
+  writeStrField(fd, "crash.application_build_version", g_appBuild);
+  writeStr(fd, ",\"crash.stack_trace\":\"");
   
   void *frames[64];
   int nframes = backtrace(frames, 64);
@@ -171,6 +214,7 @@ void ScoutSignalHandlerInstall(NSString *crashDir) {
   if (len >= SCOUT_MAX_PATH) return;
   memcpy(g_crashDirPath, cstr, len);
   g_crashDirPath[len] = 0;
+  captureRelease();
 
   for (int i = 0; i < SCOUT_NUM_SIGNALS; i++) {
     struct sigaction action;
