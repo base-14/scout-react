@@ -6,8 +6,8 @@ import {
   METRIC_KIT_CRASH,
   METRIC_KIT_HANG,
   PAYLOAD_BEGIN,
-  absorbDuplicate,
   asInProcessCrash,
+  findDuplicates,
   isInProcessCrash,
   loadRecentInProcessCrashes,
   metricKitReason,
@@ -74,14 +74,16 @@ export async function installNativeCrashReader(
       const crash = isInProcessCrash(report) ? asInProcessCrash(report) : null;
       if (crash) recentInProcess.push(crash);
     }
+    const duplicates = findDuplicates(
+      recentInProcess,
+      reports.filter((r) => !scout.crashHappenedWhileDisabled(r)),
+    );
     for (const report of reports) {
       // Persisted by the native handlers while RUM was disabled: dropped (and
       // cleared below with the rest), never replayed.
       if (scout.crashHappenedWhileDisabled(report)) continue;
       const crashType = String(report['crash.type'] ?? '');
-      if (crashType === METRIC_KIT_CRASH && absorbDuplicate(recentInProcess, report)) {
-        continue;
-      }
+      if (duplicates.has(report)) continue;
       try {
         const attrs: Record<string, string | number | boolean> = {
           [ATTR.CRASH_TYPE]: String(report['crash.type'] ?? 'unknown'),

@@ -159,6 +159,25 @@ export function absorbDuplicate(
   return true;
 }
 
+/**
+ * The MetricKit crash reports that duplicate in-process crashes. Reports with
+ * a known signal are matched first, so one without a signal can't take the
+ * in-process crash that a same-signal report would have matched.
+ */
+export function findDuplicates(
+  recent: InProcessCrash[],
+  reports: Array<Record<string, unknown>>,
+): Set<Record<string, unknown>> {
+  const metricKit = reports.filter((r) => r['crash.type'] === METRIC_KIT_CRASH);
+  const knownSignal = (r: Record<string, unknown>) =>
+    signalNumber(r['crash.signal']) !== null;
+  const ordered = [
+    ...metricKit.filter(knownSignal),
+    ...metricKit.filter((r) => !knownSignal(r)),
+  ];
+  return new Set(ordered.filter((r) => absorbDuplicate(recent, r)));
+}
+
 /** A grouping reason: the termination reason, else exception type and signal. */
 export function metricKitReason(report: Record<string, unknown>): string {
   const termination = report['crash.termination_reason'];

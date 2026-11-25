@@ -238,6 +238,48 @@ describe('iOS MetricKit crashes', () => {
       expect(crashSpans().map(typeOf).sort()).toEqual(['kscrash', 'metric_kit_crash']);
     });
 
+    it('a report with a known signal is matched before one without, whatever the order', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          kscrash(crashAt),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            terminationReason: 'Namespace SIGNAL, Code 0xb',
+          }),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            exceptionType: '1',
+            signal: '11',
+          }),
+        ]),
+      );
+      const metricKit = crashSpans().filter((x) => typeOf(x) === 'metric_kit_crash');
+      expect(metricKit).toHaveLength(1);
+      expect(metricKit[0]!.attributes['crash.signal']).toBeUndefined();
+    });
+
+    it('still matches an in-process crash saved by an earlier SDK version', async () => {
+      const platform = memoryPlatform();
+      const crashAt = Date.now() - 2 * HOUR;
+      // Saved before signal and type were stored: time and version only.
+      await platform.setItem(
+        'scout.ios.in_process_crashes',
+        JSON.stringify([{ t: crashAt, v: '2.3.0' }]),
+      );
+      const s = await makeScout(platform);
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            exceptionType: '1',
+            signal: '11',
+          }),
+        ]),
+      );
+      expect(crashSpans()).toHaveLength(0);
+    });
+
     it('two in-process crashes absorb two of three MetricKit reports', async () => {
       const crashAt = Date.now() - 2 * HOUR;
       const s = await makeScout();
