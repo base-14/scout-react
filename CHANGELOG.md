@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     group separately.
   - MetricKit hangs (`metric_kit_hang`) are sent as `anr` spans
     (`anr.source=metric_kit`) instead of `native_crash`.
+- **Crashes reported after an app update count under the release that
+  crashed.** A crash replayed on a later launch was sent with the running
+  app's resource, so a crash in the previous version showed up under the new
+  one. When the report names its own version and build and they differ from
+  the running app's, its `native_crash` or `app_exit` span now carries
+  `service.version` (`version+build`), `app.version` and `app.build` from the
+  crash; every other resource attribute and every other span is unchanged.
+  It goes through the same export pipeline (kill switch, sampling,
+  `beforeSend`, retries, offline buffer). Applies only when the SDK derived
+  `service.version` from the app's metadata, not when `serviceVersion` is set
+  in the config. Reports without a build (the iOS signal handler, Android)
+  keep the running release.
 
 ## [0.1.24] - 2026-11-17
 

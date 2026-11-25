@@ -1,6 +1,7 @@
 import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import type { Scout } from '../../core/scout';
+import type { Release } from '../../core/release-tracers';
 import { withSuppression } from '../soft-load';
 import {
   METRIC_KIT_CRASH,
@@ -41,6 +42,18 @@ export function toAppExitAttributes(
     else out[k] = v;
   }
   return out;
+}
+
+/**
+ * The release a report was written by, when it names both its version and
+ * build (the iOS signal-handler and Android reports carry no build).
+ */
+export function releaseOfCrash(report: Record<string, unknown>): Release | null {
+  const version = report['crash.app_version'] ?? report['crash.application_version'];
+  const build = report['crash.application_build_version'];
+  if (typeof version !== 'string' || typeof build !== 'string') return null;
+  if (!version.trim() || !build.trim()) return null;
+  return { version: version.trim(), build: build.trim() };
 }
 
 /** `module` stands in for the native ScoutCrash module in tests. */
@@ -174,13 +187,21 @@ export async function installNativeCrashReader(
           if (!attrs[ATTR.CRASH_REASON])
             attrs[ATTR.CRASH_REASON] = metricKitReason(report);
         }
+        // Counted under the release that crashed, not the one reading it.
+        const release = releaseOfCrash(report) ?? undefined;
         if (report[EXIT_SPAN_KEY] === SPAN.APP_EXIT) {
-          scout.emitSpan(SPAN.APP_EXIT, { ...toAppExitAttributes(attrs), ...common });
+          scout.emitSpan(
+            SPAN.APP_EXIT,
+            { ...toAppExitAttributes(attrs), ...common },
+            { release },
+          );
         } else {
           scout.emitSpan(
             SPAN.NATIVE_CRASH,
             { ...attrs, ...common },
-            startTime === undefined ? {} : { startTime, endTime: startTime },
+            startTime === undefined
+              ? { release }
+              : { startTime, endTime: startTime, release },
           );
         }
       } catch {}

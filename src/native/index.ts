@@ -22,6 +22,7 @@ import {
 } from '../core/config';
 import type { BreadcrumbManager } from '../core/breadcrumb-manager';
 import { wrapWithRetry } from '../core/retry-exporter';
+import { createReleaseTracers } from '../core/release-tracers';
 import { buildOfflineWiring } from '../core/offline-wiring';
 import {
   EnabledGate,
@@ -170,20 +171,18 @@ export const Scout = {
       resolved.exportRetry,
       { ...offline.hooks.traces, debug: !!resolved.debug, label: 'traces' },
     );
-    const traceProvider = new BasicTracerProvider({
-      resource,
-      spanProcessors: [
-        new GatedSpanProcessor(
-          new BatchSpanProcessor(traceExporter, {
-            scheduledDelayMillis: resolved.traceExportIntervalMs,
-            maxQueueSize: resolved.traceMaxQueueSize,
-            maxExportBatchSize: resolved.traceMaxExportBatchSize,
-            exportTimeoutMillis: resolved.exportTimeoutMs,
-          }),
-          gate,
-        ),
-      ],
-    });
+    const spanProcessors = [
+      new GatedSpanProcessor(
+        new BatchSpanProcessor(traceExporter, {
+          scheduledDelayMillis: resolved.traceExportIntervalMs,
+          maxQueueSize: resolved.traceMaxQueueSize,
+          maxExportBatchSize: resolved.traceMaxExportBatchSize,
+          exportTimeoutMillis: resolved.exportTimeoutMs,
+        }),
+        gate,
+      ),
+    ];
+    const traceProvider = new BasicTracerProvider({ resource, spanProcessors });
     trace.setGlobalTracerProvider(traceProvider);
     const metricExporter = wrapWithRetry(
       gateExporter(
@@ -240,6 +239,16 @@ export const Scout = {
     logs.setGlobalLoggerProvider(loggerProvider);
     (Scout as any)._providers = { traceProvider, meterProvider, loggerProvider };
     const core = new ScoutCore(config, platform);
+    // A crash replayed after an app update is labelled with the release that
+    // crashed, through the same span pipeline. Only for a version the SDK
+    // derived from the app's metadata, never one the app chose.
+    const derivedServiceVersion =
+      config.serviceVersion === undefined &&
+      !!meta.version &&
+      resource.attributes[ATTR_SERVICE_VERSION] === resolved.serviceVersion;
+    if (derivedServiceVersion) {
+      core.useReleaseTracers(createReleaseTracers(resource, spanProcessors));
+    }
     // From here on, runtime calls reach the core instead of being held.
     _bootingCore = core;
     if (_pendingUserSampling) {
