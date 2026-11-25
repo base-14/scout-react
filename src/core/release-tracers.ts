@@ -23,16 +23,30 @@ export type ReleaseTracers = (release: Release) => Tracer | null;
  * with the main provider: same batch queue, exporter, kill-switch gate,
  * retries and offline buffer. Only the resource differs. One provider per
  * release, created on first use.
+ *
+ * The running release is compared by app version and build separately. When
+ * the running resource has no build, nothing is relabelled: a crash with a
+ * build can't be told apart from the running release reliably.
+ *
+ * Providers use OpenTelemetry's default sampler, ID generator and span
+ * limits, like the main provider in src/native/index.ts. Keep them in sync
+ * if that one ever gets options of its own.
  */
 export function createReleaseTracers(
   resource: Resource,
   spanProcessors: SpanProcessor[],
 ): ReleaseTracers {
-  const current = resource.attributes[ATTR_SERVICE_VERSION];
+  const runningVersion = resource.attributes[ATTR.APP_VERSION];
+  const runningBuild = resource.attributes[ATTR.APP_BUILD];
   const tracers = new Map<string, Tracer>();
-  return ({ version, build }) => {
+  return (release) => {
+    if (typeof runningVersion !== 'string' || typeof runningBuild !== 'string')
+      return null;
+    const version = release.version.trim();
+    const build = release.build.trim();
+    if (!version || !build) return null;
+    if (version === runningVersion.trim() && build === runningBuild.trim()) return null;
     const serviceVersion = `${version}+${build}`;
-    if (serviceVersion === current) return null;
     let tracer = tracers.get(serviceVersion);
     if (!tracer) {
       const provider = new BasicTracerProvider({

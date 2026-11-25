@@ -37,8 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It goes through the same export pipeline (kill switch, sampling,
   `beforeSend`, retries, offline buffer). Applies only when the SDK derived
   `service.version` from the app's metadata, not when `serviceVersion` is set
-  in the config. Reports without a build (the iOS signal handler, Android)
-  keep the running release.
+  in the config, and when the running app has a build number. Reports
+  without a build (the iOS signal handler, Android) keep the running release.
+  Such a span starts its own trace instead of sitting inside the current
+  launch's trace.
 
 ## [0.1.24] - 2026-11-17
 

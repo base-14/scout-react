@@ -6,6 +6,7 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import { createReleaseTracers } from '../../core/release-tracers';
 import { makeRecorder, memoryPlatform, type Recorder } from '../../test/recorder';
+import { buildOfflineWiring } from '../../core/offline-wiring';
 import { EXIT_SPAN_KEY, installNativeCrashReader } from './native-crash';
 
 type Report = Record<string, unknown>;
@@ -211,5 +212,85 @@ describe('crash replayed under the release that crashed', () => {
       fakeCrashModule([metricKitCrash('0.9.0', '0')]),
     );
     expect(crashSpans()).toHaveLength(0);
+  });
+
+  it('starts as a root span, not inside the running launch trace', async () => {
+    const s = await scoutWithReleases();
+    s.setRootSpan(s.startRootSpan('app_start'), { endPrevious: false });
+    await installNativeCrashReader(
+      s,
+      fakeCrashModule([metricKitCrash('0.9.0', '0'), metricKitCrash('1.0.0', '1')]),
+    );
+    const [older, current] = [...crashSpans()].sort((a, b) =>
+      String(res(a)['service.version']).localeCompare(String(res(b)['service.version'])),
+    );
+    expect(res(older!)['service.version']).toBe('0.9.0+0');
+    expect(older!.parentSpanContext).toBeUndefined();
+    // The running release's crash keeps today's parent.
+    expect(res(current!)['service.version']).toBe('1.0.0+1');
+    expect(current!.parentSpanContext).toBeDefined();
+  });
+
+  it('ignores surrounding whitespace in the crash version and build', async () => {
+    const s = await scoutWithReleases();
+    await installNativeCrashReader(
+      s,
+      fakeCrashModule([metricKitCrash(' 1.0.0 ', ' 1 ')]),
+    );
+    expect(res(crashSpans()[0]!)['service.version']).toBe('1.0.0+1');
+  });
+
+  it("keeps each span's release through the retry and offline buffer path", async () => {
+    const s = await scoutWithReleases();
+    s.emitSpan('screen_load', {});
+    await installNativeCrashReader(s, fakeCrashModule([metricKitCrash('0.9.0', '0')]));
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: async (k: string) => store.get(k) ?? null,
+      setItem: async (k: string, v: string) => void store.set(k, v),
+      removeItem: async (k: string) => void store.delete(k),
+    };
+    const wiring = buildOfflineWiring(storage, 'http://localhost:4318', {
+      enabled: true,
+      maxItems: 100,
+    } as never);
+    // One failed batch with spans from both releases.
+    wiring.hooks.traces.onFailedAfterRetries!(rec.spans());
+    await vi.waitFor(() => expect(store.size).toBeGreaterThan(0));
+    const [raw] = [...store.values()];
+    const payload = JSON.parse(JSON.parse(raw!)[0].payload);
+    const versions = payload.resourceSpans.map(
+      (r: {
+        resource: { attributes: Array<{ key: string; value: { stringValue: string } }> };
+      }) =>
+        r.resource.attributes.find((a) => a.key === 'service.version')!.value.stringValue,
+    );
+    expect(versions.sort()).toEqual(['0.9.0+0', '1.0.0+1']);
+  });
+});
+
+describe('running app without a build number', () => {
+  let rec: Recorder;
+  const resource = resourceFromAttributes({
+    'service.name': 'test-svc',
+    'service.version': '1.0.0',
+    [ATTR.APP_VERSION]: '1.0.0',
+  });
+  beforeEach(() => {
+    rec = makeRecorder({ resource });
+  });
+
+  it('never relabels: the running release cannot be compared reliably', async () => {
+    const s = await makeScout();
+    s.useReleaseTracers(createReleaseTracers(resource, rec.spanProcessors));
+    await installNativeCrashReader(
+      s,
+      fakeCrashModule([metricKitCrash('1.0.0', '1'), metricKitCrash('0.9.0', '0')]),
+    );
+    const versions = rec
+      .spans()
+      .filter((x) => x.name === SPAN.NATIVE_CRASH)
+      .map((x) => x.resource.attributes['service.version']);
+    expect(versions).toEqual(['1.0.0', '1.0.0']);
   });
 });

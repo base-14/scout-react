@@ -1,4 +1,5 @@
 import {
+  ROOT_CONTEXT,
   context,
   trace,
   metrics,
@@ -859,12 +860,14 @@ export class Scout {
     if (!filtered) return null;
     let span: Span;
     try {
-      const parentCtx =
-        this._rootSpan && this._rootSpan !== this._rootSpanSentinel
+      const releaseTracer = opts.release ? this._releaseTracers?.(opts.release) : null;
+      // An event from another release doesn't belong in this launch's trace.
+      const parentCtx = releaseTracer
+        ? ROOT_CONTEXT
+        : this._rootSpan && this._rootSpan !== this._rootSpanSentinel
           ? trace.setSpan(context.active(), this._rootSpan)
           : context.active();
-      const tracer =
-        (opts.release && this._releaseTracers?.(opts.release)) || this.tracer;
+      const tracer = releaseTracer ?? this.tracer;
       span = tracer.startSpan(
         name,
         {
