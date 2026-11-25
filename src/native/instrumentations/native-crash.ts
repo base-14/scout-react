@@ -2,6 +2,17 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import type { Scout } from '../../core/scout';
 import { withSuppression } from '../soft-load';
+import {
+  METRIC_KIT_CRASH,
+  METRIC_KIT_HANG,
+  absorbDuplicate,
+  asInProcessCrash,
+  isInProcessCrash,
+  loadRecentInProcessCrashes,
+  metricKitReason,
+  payloadWindow,
+  saveRecentInProcessCrashes,
+} from './metrickit';
 
 /**
  * Key the Android exit-info collector sets on a pending report that must be
@@ -53,10 +64,21 @@ export async function installNativeCrashReader(
     const orphanedCrumbs = scout.breadcrumbsManager.orphaned();
     const orphanedJson = scout.breadcrumbsManager.serializeOrphaned();
     const drainProvenance = await collectDrainProvenance();
+    // In-process crashes from this drain and earlier ones that MetricKit may
+    // still report again, possibly launches later.
+    const recentInProcess = await loadRecentInProcessCrashes(scout.platformAdapter);
+    for (const report of reports) {
+      const crash = isInProcessCrash(report) ? asInProcessCrash(report) : null;
+      if (crash) recentInProcess.push(crash);
+    }
     for (const report of reports) {
       // Persisted by the native handlers while RUM was disabled: dropped (and
       // cleared below with the rest), never replayed.
       if (scout.crashHappenedWhileDisabled(report)) continue;
+      const crashType = String(report['crash.type'] ?? '');
+      if (crashType === METRIC_KIT_CRASH && absorbDuplicate(recentInProcess, report)) {
+        continue;
+      }
       try {
         const attrs: Record<string, string | number | boolean> = {
           [ATTR.CRASH_TYPE]: String(report['crash.type'] ?? 'unknown'),
@@ -112,13 +134,48 @@ export async function installNativeCrashReader(
         if (crashedSessionStart) {
           common[ATTR.SESSION_START_TIME] = crashedSessionStart;
         }
+        if (crashType === METRIC_KIT_CRASH || crashType === METRIC_KIT_HANG) {
+          // MetricKit doesn't say which session crashed; the reading one didn't.
+          delete common[ATTR.SESSION_ID];
+          delete common[ATTR.SESSION_START_TIME];
+        }
+        const window = payloadWindow(report);
+        if (crashType === METRIC_KIT_HANG) {
+          const durationMs = Number(report['crash.hang_duration_ms'] ?? 0);
+          const startTime = window ? window.begin : Date.now() - durationMs;
+          scout.emitSpan(
+            SPAN.ANR,
+            {
+              ...attrs,
+              [ATTR.ANR_DURATION_MS]: durationMs,
+              'anr.source': 'metric_kit',
+              ...common,
+            },
+            { startTime, endTime: startTime + durationMs },
+          );
+          continue;
+        }
+        let startTime: number | undefined;
+        if (crashType === METRIC_KIT_CRASH) {
+          if (window) {
+            startTime = window.begin;
+            attrs[ATTR.CRASH_TIMESTAMP] = new Date(window.begin).toISOString();
+          }
+          if (!attrs[ATTR.CRASH_REASON])
+            attrs[ATTR.CRASH_REASON] = metricKitReason(report);
+        }
         if (report[EXIT_SPAN_KEY] === SPAN.APP_EXIT) {
           scout.emitSpan(SPAN.APP_EXIT, { ...toAppExitAttributes(attrs), ...common });
         } else {
-          scout.emitSpan(SPAN.NATIVE_CRASH, { ...attrs, ...common });
+          scout.emitSpan(
+            SPAN.NATIVE_CRASH,
+            { ...attrs, ...common },
+            startTime === undefined ? {} : { startTime, endTime: startTime },
+          );
         }
       } catch {}
     }
+    await saveRecentInProcessCrashes(scout.platformAdapter, recentInProcess);
     await ScoutCrash.clearPendingCrashes();
   } catch {}
 }
