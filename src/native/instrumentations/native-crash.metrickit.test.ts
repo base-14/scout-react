@@ -159,6 +159,103 @@ describe('iOS MetricKit crashes', () => {
       expect(crashSpans().map(typeOf)).toEqual(['signal']);
     });
 
+    it('never drops a SIGKILL report, which no in-process handler can catch', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          kscrash(crashAt),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            signal: '9',
+            exceptionType: '10',
+          }),
+        ]),
+      );
+      expect(crashSpans().map(typeOf).sort()).toEqual(['kscrash', 'metric_kit_crash']);
+    });
+
+    it('never drops a watchdog termination', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          kscrash(crashAt),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            terminationReason: 'Namespace SPRINGBOARD, Code 0x8badf00d',
+          }),
+        ]),
+      );
+      expect(crashSpans().map(typeOf).sort()).toEqual(['kscrash', 'metric_kit_crash']);
+    });
+
+    it('drops the copy whose signal matches, not another crash in the same window', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          {
+            'crash.type': 'nsexception',
+            'crash.reason': 'boom',
+            'crash.nsexception_name': 'NSInvalidArgumentException',
+            'crash.timestamp': iso(crashAt),
+          },
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            exceptionType: '1',
+            signal: '11',
+          }),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            exceptionType: '10',
+            signal: '6',
+          }),
+        ]),
+      );
+      const metricKit = crashSpans().filter((x) => typeOf(x) === 'metric_kit_crash');
+      expect(crashSpans().map(typeOf).sort()).toEqual([
+        'metric_kit_crash',
+        'nsexception',
+      ]);
+      expect(metricKit[0]!.attributes[ATTR.CRASH_REASON]).toBe(
+        'EXC_BAD_ACCESS (SIGSEGV)',
+      );
+    });
+
+    it('an in-process signal does not absorb a MetricKit report with a different signal', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          kscrash(crashAt),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR, {
+            exceptionType: '10',
+            signal: '6',
+          }),
+        ]),
+      );
+      expect(crashSpans().map(typeOf).sort()).toEqual(['kscrash', 'metric_kit_crash']);
+    });
+
+    it('two in-process crashes absorb two of three MetricKit reports', async () => {
+      const crashAt = Date.now() - 2 * HOUR;
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          kscrash(crashAt),
+          kscrash(crashAt + 60_000),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR),
+          metricKitCrash(crashAt - HOUR, crashAt + HOUR),
+        ]),
+      );
+      expect(crashSpans().filter((x) => typeOf(x) === 'metric_kit_crash')).toHaveLength(
+        1,
+      );
+    });
+
     it('one in-process crash absorbs only one MetricKit crash', async () => {
       const crashAt = Date.now() - 2 * HOUR;
       const s = await makeScout();
@@ -231,6 +328,7 @@ describe('iOS MetricKit crashes', () => {
       expect(span).toBeDefined();
       expect(Math.abs(startMs(span!) - windowStart)).toBeLessThan(1000);
       expect(span!.attributes[ATTR.CRASH_TIMESTAMP]).toBe(iso(windowStart));
+      expect(span!.attributes['crash.timestamp_source']).toBe('metric_kit_payload_begin');
     });
 
     it("carries the crash's own app version and build", async () => {
@@ -259,7 +357,8 @@ describe('iOS MetricKit crashes', () => {
       );
       const [span] = crashSpans();
       expect(span).toBeDefined();
-      expect(span!.attributes[ATTR.SESSION_ID]).not.toBe(current);
+      expect(span!.attributes[ATTR.SESSION_ID]).toBeUndefined();
+      expect(span!.attributes[ATTR.SESSION_START_TIME]).toBeUndefined();
     });
   });
 
@@ -323,7 +422,9 @@ describe('iOS MetricKit crashes', () => {
         fakeCrashModule([metricKitHang(Date.now() - 3 * HOUR, Date.now() - HOUR)]),
       );
       expect(crashSpans()).toHaveLength(0);
-      expect(rec.spans().filter((x) => x.name === SPAN.ANR)).toHaveLength(1);
+      const anr = rec.spans().filter((x) => x.name === SPAN.ANR);
+      expect(anr).toHaveLength(1);
+      expect(anr[0]!.attributes[ATTR.SESSION_ID]).toBeUndefined();
     });
   });
 

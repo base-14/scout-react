@@ -13,13 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivers its crash reports late, usually on the next launch, and they were
   counted on top of the crashes the in-process handlers had already caught,
   stamped with the delivery time and session, and all grouped as one issue.
-  - A MetricKit crash that matches an in-process crash (same app version when
-    both know it, crash time inside the MetricKit payload window) is dropped,
-    also when it arrives on a later launch. Each in-process crash absorbs one
-    MetricKit report; unmatched ones, such as watchdog kills, are still
-    reported.
+  - A MetricKit crash that matches an in-process crash (crash time inside the
+    MetricKit payload window, same app version and signal where both sides
+    know them) is dropped, also when it arrives on a later launch. Each
+    in-process crash absorbs one MetricKit report, preferring one with the
+    same signal. SIGKILL and watchdog terminations, which no in-process
+    handler can catch, are always reported.
   - A MetricKit crash is placed at the start of its payload window instead of
-    the delivery time, and isn't attached to the session that read it.
+    the delivery time (`crash.timestamp_source=metric_kit_payload_begin`), and
+    isn't attached to the session that read it.
   - `crash.reason` is set from the termination reason, else the exception type
     and signal (for example `EXC_BAD_ACCESS (SIGSEGV)`), so different causes
     group separately.

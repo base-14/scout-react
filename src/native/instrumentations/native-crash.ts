@@ -5,6 +5,7 @@ import { withSuppression } from '../soft-load';
 import {
   METRIC_KIT_CRASH,
   METRIC_KIT_HANG,
+  PAYLOAD_BEGIN,
   absorbDuplicate,
   asInProcessCrash,
   isInProcessCrash,
@@ -65,7 +66,9 @@ export async function installNativeCrashReader(
     const orphanedJson = scout.breadcrumbsManager.serializeOrphaned();
     const drainProvenance = await collectDrainProvenance();
     // In-process crashes from this drain and earlier ones that MetricKit may
-    // still report again, possibly launches later.
+    // still report again, possibly launches later. Recorded before the
+    // disabled-period check on purpose: a crash dropped because RUM was off
+    // still has a MetricKit copy that must be dropped too.
     const recentInProcess = await loadRecentInProcessCrashes(scout.platformAdapter);
     for (const report of reports) {
       const crash = isInProcessCrash(report) ? asInProcessCrash(report) : null;
@@ -139,16 +142,19 @@ export async function installNativeCrashReader(
           delete common[ATTR.SESSION_ID];
           delete common[ATTR.SESSION_START_TIME];
         }
-        const window = payloadWindow(report);
+        const payload = payloadWindow(report);
         if (crashType === METRIC_KIT_HANG) {
           const durationMs = Number(report['crash.hang_duration_ms'] ?? 0);
-          const startTime = window ? window.begin : Date.now() - durationMs;
+          // Hangs in one payload share its start; without a window the
+          // delivery time is all there is, and the span says so.
+          const startTime = payload ? payload.begin : Date.now() - durationMs;
           scout.emitSpan(
             SPAN.ANR,
             {
               ...attrs,
               [ATTR.ANR_DURATION_MS]: durationMs,
               'anr.source': 'metric_kit',
+              'anr.timestamp_source': payload ? PAYLOAD_BEGIN : 'delivery',
               ...common,
             },
             { startTime, endTime: startTime + durationMs },
@@ -157,9 +163,11 @@ export async function installNativeCrashReader(
         }
         let startTime: number | undefined;
         if (crashType === METRIC_KIT_CRASH) {
-          if (window) {
-            startTime = window.begin;
-            attrs[ATTR.CRASH_TIMESTAMP] = new Date(window.begin).toISOString();
+          if (payload) {
+            startTime = payload.begin;
+            attrs[ATTR.CRASH_TIMESTAMP] = new Date(payload.begin).toISOString();
+            // Not the exact crash time, only the start of the window it fell in.
+            attrs['crash.timestamp_source'] = PAYLOAD_BEGIN;
           }
           if (!attrs[ATTR.CRASH_REASON])
             attrs[ATTR.CRASH_REASON] = metricKitReason(report);
@@ -175,6 +183,8 @@ export async function installNativeCrashReader(
         }
       } catch {}
     }
+    // Save before clearing: if anything above throws, the reports stay pending
+    // and the next drain records them again.
     await saveRecentInProcessCrashes(scout.platformAdapter, recentInProcess);
     await ScoutCrash.clearPendingCrashes();
   } catch {}

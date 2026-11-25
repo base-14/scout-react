@@ -17,11 +17,29 @@ const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_KEPT = 50;
 /** Slack around the payload window, for clock and rounding differences. */
 const WINDOW_SLACK_MS = 60_000;
+/** `crash.timestamp_source` on a MetricKit crash: the time is its payload window's start. */
+export const PAYLOAD_BEGIN = 'metric_kit_payload_begin';
 
-/** An in-process crash not yet matched to a MetricKit report. */
+const SIGABRT = 6;
+const SIGKILL = 9;
+/**
+ * Terminations the OS performs from outside the process (watchdog, resource
+ * and thermal kills). No in-process handler can catch them, so a MetricKit
+ * report of one is never a duplicate.
+ */
+const EXTERNAL_TERMINATION =
+  /0x8badf00d|0xdead10cc|0xc00010ff|0xbad22222|0xbaadca11|SPRINGBOARD|RUNNINGBOARD|FRONTBOARD|watchdog/i;
+
+/**
+ * An in-process crash not yet matched to a MetricKit report: time, app
+ * version, signal number and crash type. Entries saved by earlier versions
+ * have no signal or type; they match any signal.
+ */
 export interface InProcessCrash {
   t: number;
   v: string | null;
+  s?: number | null;
+  k?: string | null;
 }
 
 const EXCEPTION_TYPES: Record<string, string> = {
@@ -51,6 +69,20 @@ const SIGNALS: Record<string, string> = {
   '15': 'SIGTERM',
 };
 
+const SIGNAL_NUMBERS: Record<string, number> = Object.fromEntries(
+  Object.entries(SIGNALS).map(([n, name]) => [name, Number(n)]),
+);
+
+/** Signal number from a name (`SIGSEGV`, written in-process) or a number (MetricKit). */
+function signalNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isInteger(v)) return v;
+  if (typeof v !== 'string' || v === '') return null;
+  if (/^\d+$/.test(v)) return Number(v);
+  return SIGNAL_NUMBERS[v.toUpperCase()] ?? null;
+}
+
+// Every writer in ios/ stores ISO 8601 strings with a zone; numbers are
+// taken as epoch milliseconds.
 function toMs(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v !== 'string' || v === '') return null;
@@ -71,7 +103,12 @@ export function isInProcessCrash(report: Record<string, unknown>): boolean {
 
 export function asInProcessCrash(report: Record<string, unknown>): InProcessCrash | null {
   const t = toMs(report['crash.timestamp']);
-  return t === null ? null : { t, v: versionOf(report) };
+  if (t === null) return null;
+  const k = String(report['crash.type']);
+  // An uncaught NSException ends in abort().
+  const s =
+    signalNumber(report['crash.signal']) ?? (k === 'nsexception' ? SIGABRT : null);
+  return { t, v: versionOf(report), s, k };
 }
 
 /** The payload window a MetricKit diagnostic was collected in. */
@@ -84,26 +121,41 @@ export function payloadWindow(
   return { begin, end };
 }
 
+/** Killed from outside the process: SIGKILL or a watchdog-style termination. */
+function terminatedExternally(report: Record<string, unknown>): boolean {
+  if (signalNumber(report['crash.signal']) === SIGKILL) return true;
+  const reason = report['crash.termination_reason'];
+  return typeof reason === 'string' && EXTERNAL_TERMINATION.test(reason);
+}
+
 /**
- * Removes and returns true for the first in-process crash this MetricKit
- * report duplicates: same app version (when both know it) and a crash time
- * inside the payload window. Each in-process crash absorbs one report.
+ * Removes and returns true for the in-process crash this MetricKit report
+ * duplicates: crash time inside the payload window, same app version and
+ * signal where both sides know them. A crash with the same signal is
+ * preferred over one whose signal is unknown. Each in-process crash absorbs
+ * one report; external terminations are never absorbed.
  */
 export function absorbDuplicate(
   recent: InProcessCrash[],
   report: Record<string, unknown>,
 ): boolean {
-  const window = payloadWindow(report);
-  if (!window) return false;
+  if (terminatedExternally(report)) return false;
+  const payload = payloadWindow(report);
+  if (!payload) return false;
   const version = versionOf(report);
-  const i = recent.findIndex(
-    (c) =>
-      c.t >= window.begin - WINDOW_SLACK_MS &&
-      c.t <= window.end + WINDOW_SLACK_MS &&
-      (c.v === null || version === null || c.v === version),
-  );
-  if (i < 0) return false;
-  recent.splice(i, 1);
+  const signal = signalNumber(report['crash.signal']);
+  const candidates = recent
+    .map((c, i) => ({ c, i }))
+    .filter(
+      ({ c }) =>
+        c.t >= payload.begin - WINDOW_SLACK_MS &&
+        c.t <= payload.end + WINDOW_SLACK_MS &&
+        (c.v === null || version === null || c.v === version) &&
+        (c.s == null || signal === null || c.s === signal),
+    );
+  const best = candidates.find(({ c }) => c.s != null && c.s === signal) ?? candidates[0];
+  if (!best) return false;
+  recent.splice(best.i, 1);
   return true;
 }
 
@@ -141,7 +193,10 @@ export async function saveRecentInProcessCrashes(
   recent: InProcessCrash[],
 ): Promise<void> {
   const cutoff = Date.now() - KEEP_MS;
-  const kept = recent.filter((c) => c.t >= cutoff).slice(-MAX_KEPT);
+  const kept = recent
+    .filter((c) => c.t >= cutoff)
+    .sort((a, b) => a.t - b.t)
+    .slice(-MAX_KEPT);
   try {
     await platform.setItem(RECENT_KEY, JSON.stringify(kept));
   } catch {}
