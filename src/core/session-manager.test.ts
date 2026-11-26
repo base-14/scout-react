@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SessionManager } from './session-manager';
+import { SessionManager, sessionAt } from './session-manager';
 import type { PlatformAdapter } from './platform';
 function memoryPlatform(seed?: Record<string, string>): PlatformAdapter {
   const store = new Map<string, string>(Object.entries(seed ?? {}));
@@ -164,5 +164,90 @@ describe('SessionManager', () => {
     });
     await b.start();
     expect(b.sessionId).not.toBe(firstId);
+  });
+});
+
+describe('session history', () => {
+  const MIN = 60_000;
+  const T0 = Date.parse('2026-01-01T00:00:00Z');
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(T0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const make = (platform = memoryPlatform()) =>
+    new SessionManager(platform, { timeoutMinutes: 30, sampleRate: 100 });
+
+  it('finds the session that was running at a past time', async () => {
+    const mgr = make();
+    await mgr.start();
+    const first = mgr.sessionId;
+    vi.setSystemTime(new Date(T0 + 10 * MIN));
+    mgr.touch();
+    vi.setSystemTime(new Date(T0 + 3 * 60 * MIN));
+    await mgr.rotate();
+    expect((await mgr.sessionAt(T0 + 5 * MIN))?.id).toBe(first);
+    expect((await mgr.sessionAt(T0 + 3 * 60 * MIN))?.id).toBe(mgr.sessionId);
+  });
+
+  it('finds nothing for a time no recorded session covers', async () => {
+    const mgr = make();
+    await mgr.start();
+    vi.setSystemTime(new Date(T0 + 3 * 60 * MIN));
+    await mgr.rotate();
+    expect(await mgr.sessionAt(T0 - 60 * MIN)).toBeNull();
+    // The first session was last active at T0; an hour later it wasn't running.
+    expect(await mgr.sessionAt(T0 + 60 * MIN)).toBeNull();
+  });
+
+  it('is read back by a later launch', async () => {
+    const platform = memoryPlatform();
+    const a = make(platform);
+    await a.start();
+    const first = a.sessionId;
+    vi.setSystemTime(new Date(T0 + 3 * 60 * MIN));
+    const b = make(platform);
+    await b.start();
+    expect(b.sessionId).not.toBe(first);
+    expect((await b.sessionAt(T0 + MIN))?.id).toBe(first);
+  });
+
+  it('records activity at most once a minute', async () => {
+    const platform = memoryPlatform();
+    const writes = vi.spyOn(platform, 'setItem');
+    const mgr = make(platform);
+    await mgr.start();
+    const historyWrites = () =>
+      writes.mock.calls.filter(([k]) => k === 'scout.session.history').length;
+    const afterStart = historyWrites();
+    for (let i = 1; i <= 10; i++) {
+      vi.setSystemTime(new Date(T0 + i * 1000));
+      mgr.touch();
+    }
+    await vi.runAllTimersAsync();
+    expect(historyWrites()).toBe(afterStart);
+    vi.setSystemTime(new Date(T0 + 2 * MIN));
+    mgr.touch();
+    await vi.runAllTimersAsync();
+    expect(historyWrites()).toBe(afterStart + 1);
+  });
+});
+
+describe('sessionAt', () => {
+  const MIN = 60_000;
+  it('picks the latest session started by then', () => {
+    const history = [
+      { id: 'a', s: 0, e: 100 * MIN },
+      { id: 'b', s: 50 * MIN, e: 100 * MIN },
+    ];
+    expect(sessionAt(history, 60 * MIN)?.id).toBe('b');
+    expect(sessionAt(history, 10 * MIN)?.id).toBe('a');
+  });
+
+  it('allows a window start rounded down to the minute', () => {
+    // Started 30 s into the minute the window starts at.
+    expect(sessionAt([{ id: 'a', s: 30_000, e: 5 * MIN }], 0)?.id).toBe('a');
   });
 });

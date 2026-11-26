@@ -389,33 +389,137 @@ describe('iOS MetricKit crashes', () => {
       expect(span!.attributes['crash.application_build_version']).toBe('120');
     });
 
-    it('is not attributed to the session that delivered it', async () => {
+    it('is put in the session that was running when it crashed', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const t0 = Date.now();
+        const s = await makeScout();
+        const crashed = s.commonAttributes()[ATTR.SESSION_ID];
+        // A later launch: a new session reads the report.
+        vi.setSystemTime(t0 + 3 * HOUR);
+        await s.sessionManager.rotate();
+        const reading = s.commonAttributes()[ATTR.SESSION_ID];
+        expect(reading).not.toBe(crashed);
+        await installNativeCrashReader(
+          s,
+          fakeCrashModule([metricKitCrash(t0 + 60_000, t0 + 60_000)]),
+        );
+        const [span] = crashSpans();
+        expect(span!.attributes[ATTR.SESSION_ID]).toBe(crashed);
+        expect(span!.attributes[ATTR.SESSION_START_TIME]).toBe(iso(t0));
+        expect(span!.attributes['crash.session_source']).toBe('crash_time');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the reading session, marked as such, when no recorded session covers it', async () => {
+      // RUM leaves crashes without a session out of the crash list and counts.
       const s = await makeScout();
-      const current = s.commonAttributes()[ATTR.SESSION_ID];
-      expect(current).toBeTruthy();
+      const reading = s.commonAttributes()[ATTR.SESSION_ID];
       await installNativeCrashReader(
         s,
-        fakeCrashModule([metricKitCrash(Date.now() - 3 * HOUR, Date.now() - HOUR)]),
+        fakeCrashModule([metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR)]),
       );
       const [span] = crashSpans();
-      expect(span).toBeDefined();
-      expect(span!.attributes[ATTR.SESSION_ID]).toBeUndefined();
-      expect(span!.attributes[ATTR.SESSION_START_TIME]).toBeUndefined();
+      expect(span!.attributes[ATTR.SESSION_ID]).toBe(reading);
+      expect(span!.attributes['crash.session_source']).toBe('delivery');
     });
   });
 
   describe('grouping', () => {
-    it('gets a reason from the termination reason', async () => {
+    // Shaped like RunningBoard's text; ids, pids and timings differ per report.
+    const watchdog = (explanation: string, pid: number, uuid: string) =>
+      `<RBSTerminateContext| domain:10 code:0x8BADF00D explanation:${explanation.replace('APP', `app<com.example.app(${uuid})>:${pid}`)}\n` +
+      'ProcessVisibility: Foreground\nProcessState: Running\nWatchdogEvent: scene-create\n' +
+      'WatchdogCPUStatistics: (\n"Elapsed total CPU time (seconds): 15.180 (user 8.460, system 6.720), 12% CPU"\n) reportType:CrashLog>';
+    const SCENE_CREATE =
+      'scene-create watchdog transgression: APP exhausted real (wall clock) time allowance of 19.89 seconds';
+
+    it('watchdog kills of one cause share one title', async () => {
       const s = await makeScout();
       await installNativeCrashReader(
         s,
         fakeCrashModule([
-          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - HOUR, {
-            terminationReason: 'Namespace SPRINGBOARD, Code 0x8badf00d',
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            exceptionType: '10',
+            terminationReason: watchdog(
+              SCENE_CREATE,
+              21162,
+              'FEEDEEEE-DDDD-CCCC-BBBB-0000000001F5',
+            ),
+          }),
+          metricKitCrash(Date.now() - 2 * HOUR, Date.now() - 2 * HOUR, {
+            signal: '9',
+            exceptionType: '10',
+            terminationReason: watchdog(
+              SCENE_CREATE.replace('19.89', '10.00'),
+              874,
+              'C4A1B2C3-1234-4ABC-9DEF-0123456789AB',
+            ),
           }),
         ]),
       );
-      expect(crashSpans()[0]!.attributes[ATTR.CRASH_REASON]).toContain('0x8badf00d');
+      const spans = crashSpans();
+      expect(spans).toHaveLength(2);
+      for (const span of spans) {
+        expect(span.attributes[ATTR.CRASH_REASON]).toBe('Watchdog: scene-create timeout');
+        // The full text stays on the span for the detail view.
+        expect(span.attributes['crash.termination_reason']).toContain('0x8BADF00D');
+      }
+    });
+
+    it('names each watchdog cause', async () => {
+      const s = await makeScout();
+      const reasons = [
+        watchdog(
+          'scene-update watchdog transgression: APP exhausted real (wall clock) time allowance of 9.90 seconds',
+          1,
+          'A',
+        ),
+        '<RBSTerminateContext| domain:10 code:0x8BADF00D explanation:[app<com.example.app>:4410] Failed to terminate gracefully after 5.0s\nProcessVisibility: Unknown>',
+        'Namespace SPRINGBOARD, Code 0x8badf00d',
+      ];
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule(
+          reasons.map((r) =>
+            metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+              signal: '9',
+              terminationReason: r,
+            }),
+          ),
+        ),
+      );
+      expect(crashSpans().map((x) => x.attributes[ATTR.CRASH_REASON])).toEqual([
+        'Watchdog: scene-update timeout',
+        'Watchdog: failed to terminate',
+        'Watchdog termination',
+      ]);
+    });
+
+    it('other termination reasons lose their per-report ids', async () => {
+      const s = await makeScout();
+      const reason = (pid: number, uuid: string) =>
+        `<RBSTerminateContext| domain:15 code:0xDEAD10CC explanation:app<com.example.app(${uuid})>:${pid} held a lock for 2.75 seconds\nProcessVisibility: Background>`;
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            terminationReason: reason(120, '11111111-2222-4333-8444-555555555555'),
+          }),
+          metricKitCrash(Date.now() - 2 * HOUR, Date.now() - 2 * HOUR, {
+            signal: '9',
+            terminationReason: reason(4321, '66666666-7777-4888-9999-000000000000'),
+          }),
+        ]),
+      );
+      const [a, b] = crashSpans().map((x) => x.attributes[ATTR.CRASH_REASON]);
+      expect(a).toBe(b);
+      expect(a).toContain('0xDEAD10CC');
+      expect(a).not.toMatch(/4321|120|1111|2\.75/);
     });
 
     it('gets a reason from the exception type and signal', async () => {
@@ -466,7 +570,11 @@ describe('iOS MetricKit crashes', () => {
       expect(crashSpans()).toHaveLength(0);
       const anr = rec.spans().filter((x) => x.name === SPAN.ANR);
       expect(anr).toHaveLength(1);
-      expect(anr[0]!.attributes[ATTR.SESSION_ID]).toBeUndefined();
+      // No recorded session covers its window, so it stays visible in the reading one.
+      expect(anr[0]!.attributes[ATTR.SESSION_ID]).toBe(
+        s.commonAttributes()[ATTR.SESSION_ID],
+      );
+      expect(anr[0]!.attributes['crash.session_source']).toBe('delivery');
     });
   });
 

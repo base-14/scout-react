@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **iOS: MetricKit crashes and hangs show up in RUM again.** 0.1.25 sent them
+  without a session, and RUM's rollup tables leave out crash, error and ANR
+  events that have no `session.id`, so they were missing from the crash list
+  and counts. They now carry the session that was running at their payload
+  window (`crash.session_source=crash_time`). The SDK keeps a short history of
+  recent sessions for this (`scout.session.history`: id, start, last activity,
+  up to 30 sessions or 7 days, written when a session starts and at most once
+  a minute after). When no recorded session covers the window, for example a
+  launch killed before the SDK started, the session reading the report is
+  used and marked `crash.session_source=delivery`.
+- **iOS: MetricKit crash titles stay the same for every report of one cause.**
+  0.1.25 used the full termination reason, which holds the bundle id, process
+  id, a per-launch UUID and measured times, so each report became its own
+  issue. Watchdog terminations (`0x8BADF00D`) are now titled by cause:
+  `Watchdog: scene-create timeout`, `Watchdog: scene-update timeout`,
+  `Watchdog: failed to terminate`, else `Watchdog termination`. Other
+  termination reasons keep their first line without ids, UUIDs, long hex
+  values and measured times. The full text stays in
+  `crash.termination_reason`.
+
 ## [0.1.25] - 2026-11-25
 
 ### Fixed
