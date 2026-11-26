@@ -1,6 +1,51 @@
 import type { PlatformAdapter } from './platform';
 import { uuidv4 } from './uuid';
 const STORAGE_KEY = 'scout.session';
+/**
+ * Recent sessions with when they started and were last active, so a report
+ * delivered launches later (iOS MetricKit) can be put back in the session
+ * that was running when it happened.
+ */
+const HISTORY_KEY = 'scout.session.history';
+const HISTORY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+const HISTORY_MAX = 30;
+/** `lastActiveAt` is written to the history at most this often. */
+const HISTORY_ACTIVE_STEP_MS = 60_000;
+/** A MetricKit window start is the event time rounded down to the minute. */
+const WINDOW_ROUNDING_MS = 60_000;
+
+/** A session as recorded in the history: id, start and last activity (epoch ms). */
+export interface SessionRecord {
+  id: string;
+  s: number;
+  e: number;
+}
+
+/**
+ * The session that was running at `t`: the latest one started by then that
+ * hadn't yet gone idle for `idleMs` (the session timeout; a session stays live
+ * that long without activity). Failing that, one started within a minute
+ * after `t`, since `t` may be rounded down to the minute. `null` when no
+ * recorded session covers it, e.g. a launch killed before the SDK started.
+ */
+export function sessionAt(
+  history: SessionRecord[],
+  t: number,
+  idleMs: number,
+): SessionRecord | null {
+  const live = (r: SessionRecord) => t <= r.e + Math.max(idleMs, HISTORY_ACTIVE_STEP_MS);
+  let running: SessionRecord | null = null;
+  let justAfter: SessionRecord | null = null;
+  for (const r of history) {
+    if (!live(r)) continue;
+    if (r.s <= t) {
+      if (!running || r.s > running.s) running = r;
+    } else if (r.s <= t + WINDOW_ROUNDING_MS) {
+      if (!justAfter || r.s < justAfter.s) justAfter = r;
+    }
+  }
+  return running ?? justAfter;
+}
 /** Where a session's `sampled` decision came from. */
 export type SamplingSource = 'user' | 'fallback';
 interface PersistedSession {
@@ -228,6 +273,9 @@ export class SessionManager {
     const hadSession = this.current !== null;
     this.suspend();
     if (hadSession) await safe(() => this.platform.removeItem(STORAGE_KEY));
+    // The history names sessions too; ending RUM forgets it as well.
+    this.history = null;
+    await safe(() => this.platform.removeItem(HISTORY_KEY));
   }
   /**
    * Leaves the disabled state with a fresh session, its sampling decided like
@@ -237,9 +285,70 @@ export class SessionManager {
     this.suspended = false;
     return this.rotate();
   }
+  /** The recorded session that was running at `t` (epoch ms), if any. */
+  async sessionAt(t: number): Promise<SessionRecord | null> {
+    return sessionAt((await this.loadHistory()) ?? [], t, this.timeoutMs);
+  }
+
+  private history: SessionRecord[] | null = null;
+
+  /** `null` when storage couldn't be read: nothing is cached, so nothing is overwritten. */
+  private async loadHistory(): Promise<SessionRecord[] | null> {
+    if (this.history) return this.history;
+    let raw: string | null;
+    try {
+      raw = await this.platform.getItem(HISTORY_KEY);
+    } catch {
+      return null;
+    }
+    let parsed: unknown = [];
+    try {
+      parsed = raw ? JSON.parse(raw) : [];
+    } catch {}
+    const records = Array.isArray(parsed)
+      ? parsed.filter(
+          (r): r is SessionRecord =>
+            typeof r?.id === 'string' &&
+            typeof r?.s === 'number' &&
+            typeof r?.e === 'number',
+        )
+      : [];
+    // A write made while this read was in flight wins.
+    if (!this.history) this.history = records;
+    return this.history;
+  }
+
+  /**
+   * Records the current session in the history: always when it is new, and
+   * at most once a minute for its last activity, so `touch()` on every span
+   * doesn't add a second storage write each time.
+   */
+  private async recordHistory(cur: PersistedSession): Promise<void> {
+    const history = await this.loadHistory();
+    // Unreadable storage, or RUM turned off while this write was pending.
+    if (!history || this.suspended) return;
+    const entry = history.find((r) => r.id === cur.id);
+    if (entry) {
+      if (cur.lastActiveAt - entry.e < HISTORY_ACTIVE_STEP_MS) return;
+      entry.e = cur.lastActiveAt;
+    } else {
+      history.push({ id: cur.id, s: cur.startedAt, e: cur.lastActiveAt });
+    }
+    const cutoff = Date.now() - HISTORY_KEEP_MS;
+    const kept = history
+      .filter((r) => r.e >= cutoff)
+      .sort((a, b) => a.s - b.s)
+      .slice(-HISTORY_MAX);
+    this.history = kept;
+    await safe(() => this.platform.setItem(HISTORY_KEY, JSON.stringify(kept)));
+  }
+
   private async persist(): Promise<void> {
     if (this.suspended || !this.current) return;
-    await safe(() => this.platform.setItem(STORAGE_KEY, JSON.stringify(this.current)));
+    // The session as it is now: a rotation may replace it before the history write.
+    const snapshot = { ...this.current };
+    await safe(() => this.platform.setItem(STORAGE_KEY, JSON.stringify(snapshot)));
+    await this.recordHistory(snapshot);
   }
 }
 /**

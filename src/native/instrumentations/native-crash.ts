@@ -6,7 +6,10 @@ import { withSuppression } from '../soft-load';
 import {
   METRIC_KIT_CRASH,
   METRIC_KIT_HANG,
+  MAX_SESSION_WINDOW_MS,
   PAYLOAD_BEGIN,
+  SESSION_AT_CRASH,
+  SESSION_AT_DELIVERY,
   asInProcessCrash,
   findDuplicates,
   isInProcessCrash,
@@ -152,12 +155,24 @@ export async function installNativeCrashReader(
         if (crashedSessionStart) {
           common[ATTR.SESSION_START_TIME] = crashedSessionStart;
         }
-        if (crashType === METRIC_KIT_CRASH || crashType === METRIC_KIT_HANG) {
-          // MetricKit doesn't say which session crashed; the reading one didn't.
-          delete common[ATTR.SESSION_ID];
-          delete common[ATTR.SESSION_START_TIME];
-        }
         const payload = payloadWindow(report);
+        if (crashType === METRIC_KIT_CRASH || crashType === METRIC_KIT_HANG) {
+          // MetricKit doesn't say which session crashed: take the one running
+          // at the payload window, unless the window is too wide to tell.
+          // RUM drops crashes without a session, so otherwise the reading
+          // session is kept, marked as such.
+          const crashed =
+            payload && payload.end - payload.begin <= MAX_SESSION_WINDOW_MS
+              ? await scout.sessionManager.sessionAt(payload.begin)
+              : null;
+          if (crashed) {
+            common[ATTR.SESSION_ID] = crashed.id;
+            common[ATTR.SESSION_START_TIME] = new Date(crashed.s).toISOString();
+          }
+          attrs['crash.session_source'] = crashed
+            ? SESSION_AT_CRASH
+            : SESSION_AT_DELIVERY;
+        }
         if (crashType === METRIC_KIT_HANG) {
           const durationMs = Number(report['crash.hang_duration_ms'] ?? 0);
           // Hangs in one payload share its start; without a window the

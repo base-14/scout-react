@@ -19,6 +19,15 @@ const MAX_KEPT = 50;
 const WINDOW_SLACK_MS = 60_000;
 /** `crash.timestamp_source` on a MetricKit crash: the time is its payload window's start. */
 export const PAYLOAD_BEGIN = 'metric_kit_payload_begin';
+/** `crash.session_source`: the session recorded as running at the crash window. */
+export const SESSION_AT_CRASH = 'crash_time';
+/** `crash.session_source`: no recorded session covers the crash; the reading one is used. */
+export const SESSION_AT_DELIVERY = 'delivery';
+/**
+ * Payload windows wider than this (older iOS delivered day-long ones) don't
+ * say when the crash happened closely enough to pick its session.
+ */
+export const MAX_SESSION_WINDOW_MS = 5 * 60_000;
 
 const SIGABRT = 6;
 const SIGKILL = 9;
@@ -178,10 +187,52 @@ export function findDuplicates(
   return new Set(ordered.filter((r) => absorbDuplicate(recent, r)));
 }
 
-/** A grouping reason: the termination reason, else exception type and signal. */
+const WATCHDOG = /0x8badf00d/i;
+
+/** Watchdog causes by the phrase RunningBoard uses in the termination reason. */
+const WATCHDOG_CAUSES: Array<[RegExp, string]> = [
+  [/scene-create watchdog/i, 'scene-create timeout'],
+  [/scene-update watchdog/i, 'scene-update timeout'],
+  [/failed to terminate gracefully/i, 'failed to terminate'],
+];
+
+/**
+ * A termination reason without the parts that differ on every report:
+ * bundle and process ids, UUIDs, long hex values and measured times. Only
+ * the first non-blank line is kept; the full text stays in
+ * `crash.termination_reason`.
+ */
+function stableTermination(reason: string): string {
+  const firstLine = reason.split('\n').find((l) => l.trim() !== '') ?? '';
+  return firstLine
+    .replace(/<RBSTerminateContext\|\s*/i, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
+    .replace(/\b(?:app|application)<[^>]*>(?::\d+)?/gi, 'app')
+    .replace(/\[app[^\]]*\]/gi, 'app')
+    .replace(/\b0x[0-9a-f]{9,}\b/gi, '0x…')
+    .replace(/\d+\.\d+/g, 'N')
+    .replace(/\b\d+\s?(?:ms|s|secs?|seconds?)\b/gi, 'N')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+    .trim();
+}
+
+/**
+ * A grouping reason that is the same for every report of one cause: a
+ * watchdog cause, else the termination reason without per-report ids, else
+ * exception type and signal.
+ */
 export function metricKitReason(report: Record<string, unknown>): string {
   const termination = report['crash.termination_reason'];
-  if (typeof termination === 'string' && termination !== '') return termination;
+  if (typeof termination === 'string' && termination !== '') {
+    if (WATCHDOG.test(termination)) {
+      const cause = WATCHDOG_CAUSES.find(([re]) => re.test(termination));
+      return cause ? `Watchdog: ${cause[1]}` : 'Watchdog termination';
+    }
+    const stable = stableTermination(termination);
+    if (stable) return stable;
+  }
   const exception = String(report['crash.exception_type'] ?? '');
   const signal = String(report['crash.signal'] ?? '');
   const exceptionName =
