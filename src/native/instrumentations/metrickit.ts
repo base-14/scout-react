@@ -23,6 +23,11 @@ export const PAYLOAD_BEGIN = 'metric_kit_payload_begin';
 export const SESSION_AT_CRASH = 'crash_time';
 /** `crash.session_source`: no recorded session covers the crash; the reading one is used. */
 export const SESSION_AT_DELIVERY = 'delivery';
+/**
+ * Payload windows wider than this (older iOS delivered day-long ones) don't
+ * say when the crash happened closely enough to pick its session.
+ */
+export const MAX_SESSION_WINDOW_MS = 5 * 60_000;
 
 const SIGABRT = 6;
 const SIGKILL = 9;
@@ -206,6 +211,7 @@ function stableTermination(reason: string): string {
     .replace(/\[app[^\]]*\]/gi, 'app')
     .replace(/\b0x[0-9a-f]{9,}\b/gi, '0x…')
     .replace(/\d+\.\d+/g, 'N')
+    .replace(/\b\d+\s?(?:ms|s|secs?|seconds?)\b/gi, 'N')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120)

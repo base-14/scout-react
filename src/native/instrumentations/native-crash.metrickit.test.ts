@@ -414,6 +414,30 @@ describe('iOS MetricKit crashes', () => {
       }
     });
 
+    it('does not guess a session from a wide payload window', async () => {
+      // Older iOS delivered day-long windows; their start says little about
+      // which session crashed, so the reading session is used and marked.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const t0 = Date.now();
+        const s = await makeScout();
+        const covering = s.commonAttributes()[ATTR.SESSION_ID];
+        vi.setSystemTime(t0 + 25 * HOUR);
+        await s.sessionManager.rotate();
+        const reading = s.commonAttributes()[ATTR.SESSION_ID];
+        await installNativeCrashReader(
+          s,
+          fakeCrashModule([metricKitCrash(t0 + 60_000, t0 + 24 * HOUR)]),
+        );
+        const [span] = crashSpans();
+        expect(span!.attributes[ATTR.SESSION_ID]).toBe(reading);
+        expect(span!.attributes[ATTR.SESSION_ID]).not.toBe(covering);
+        expect(span!.attributes['crash.session_source']).toBe('delivery');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('keeps the reading session, marked as such, when no recorded session covers it', async () => {
       // RUM leaves crashes without a session out of the crash list and counts.
       const s = await makeScout();
@@ -520,6 +544,34 @@ describe('iOS MetricKit crashes', () => {
       const [a, b] = crashSpans().map((x) => x.attributes[ATTR.CRASH_REASON]);
       expect(a).toBe(b);
       expect(a).not.toMatch(/2345|com\.example/);
+    });
+
+    it('termination reasons lose whole-number durations', async () => {
+      const s = await makeScout();
+      const reason = (secs: number) =>
+        `Namespace RUNNINGBOARD, Code 0xdead10cc app held a file lock after ${secs}s`;
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            terminationReason: reason(5),
+          }),
+          metricKitCrash(Date.now() - 2 * HOUR, Date.now() - 2 * HOUR, {
+            signal: '9',
+            terminationReason: reason(6),
+          }),
+          metricKitCrash(Date.now() - HOUR, Date.now() - HOUR, {
+            signal: '9',
+            terminationReason:
+              'Namespace RUNNINGBOARD, Code 0xdead10cc app held a file lock after 12 seconds',
+          }),
+        ]),
+      );
+      const reasons = crashSpans().map((x) => x.attributes[ATTR.CRASH_REASON]);
+      expect(new Set(reasons).size).toBe(1);
+      // Codes are kept; only the duration is replaced.
+      expect(reasons[0]).toContain('0xdead10cc');
     });
 
     it('a termination reason starting with a blank line keeps its text', async () => {
