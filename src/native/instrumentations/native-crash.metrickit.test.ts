@@ -400,9 +400,10 @@ describe('iOS MetricKit crashes', () => {
         await s.sessionManager.rotate();
         const reading = s.commonAttributes()[ATTR.SESSION_ID];
         expect(reading).not.toBe(crashed);
+        // Crashed 5 minutes after the last activity, still inside the idle timeout.
         await installNativeCrashReader(
           s,
-          fakeCrashModule([metricKitCrash(t0 + 60_000, t0 + 60_000)]),
+          fakeCrashModule([metricKitCrash(t0 + 5 * 60_000, t0 + 5 * 60_000)]),
         );
         const [span] = crashSpans();
         expect(span!.attributes[ATTR.SESSION_ID]).toBe(crashed);
@@ -497,6 +498,62 @@ describe('iOS MetricKit crashes', () => {
         'Watchdog: failed to terminate',
         'Watchdog termination',
       ]);
+    });
+
+    it('termination reasons naming the application lose its pid', async () => {
+      const s = await makeScout();
+      const reason = (pid: number) =>
+        `<RBSTerminateContext| domain:15 code:0xDEAD10CC explanation:application<com.example.app>:${pid} was suspended with locked system files>`;
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            terminationReason: reason(1),
+          }),
+          metricKitCrash(Date.now() - 2 * HOUR, Date.now() - 2 * HOUR, {
+            signal: '9',
+            terminationReason: reason(2345),
+          }),
+        ]),
+      );
+      const [a, b] = crashSpans().map((x) => x.attributes[ATTR.CRASH_REASON]);
+      expect(a).toBe(b);
+      expect(a).not.toMatch(/2345|com\.example/);
+    });
+
+    it('a termination reason starting with a blank line keeps its text', async () => {
+      const s = await makeScout();
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            exceptionType: '10',
+            terminationReason: '\nNamespace JETSAM, Code 0x5 Memory limit exceeded',
+          }),
+        ]),
+      );
+      expect(crashSpans()[0]!.attributes[ATTR.CRASH_REASON]).toBe(
+        'Namespace JETSAM, Code 0x5 Memory limit exceeded',
+      );
+    });
+
+    it('a long termination reason is cut without a trailing space', async () => {
+      const s = await makeScout();
+      const words = Array.from({ length: 40 }, (_, i) => `w${i}`).join(' ');
+      await installNativeCrashReader(
+        s,
+        fakeCrashModule([
+          metricKitCrash(Date.now() - 3 * HOUR, Date.now() - 3 * HOUR, {
+            signal: '9',
+            terminationReason: words,
+          }),
+        ]),
+      );
+      const reason = String(crashSpans()[0]!.attributes[ATTR.CRASH_REASON]);
+      expect(reason.length).toBeLessThanOrEqual(120);
+      expect(reason).toBe(reason.trim());
     });
 
     it('other termination reasons lose their per-report ids', async () => {

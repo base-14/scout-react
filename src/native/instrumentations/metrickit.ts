@@ -194,20 +194,22 @@ const WATCHDOG_CAUSES: Array<[RegExp, string]> = [
 /**
  * A termination reason without the parts that differ on every report:
  * bundle and process ids, UUIDs, long hex values and measured times. Only
- * the first line is kept; the full text stays in `crash.termination_reason`.
+ * the first non-blank line is kept; the full text stays in
+ * `crash.termination_reason`.
  */
 function stableTermination(reason: string): string {
-  return reason
-    .split('\n')[0]!
+  const firstLine = reason.split('\n').find((l) => l.trim() !== '') ?? '';
+  return firstLine
     .replace(/<RBSTerminateContext\|\s*/i, '')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
-    .replace(/app<[^>]*>(:\d+)?/gi, 'app')
+    .replace(/\b(?:app|application)<[^>]*>(?::\d+)?/gi, 'app')
     .replace(/\[app[^\]]*\]/gi, 'app')
     .replace(/\b0x[0-9a-f]{9,}\b/gi, '0x…')
     .replace(/\d+\.\d+/g, 'N')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 120);
+    .slice(0, 120)
+    .trim();
 }
 
 /**

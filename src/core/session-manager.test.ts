@@ -214,6 +214,33 @@ describe('session history', () => {
     expect((await b.sessionAt(T0 + MIN))?.id).toBe(first);
   });
 
+  it('forgets the history when RUM is turned off', async () => {
+    const platform = memoryPlatform();
+    const mgr = make(platform);
+    await mgr.start();
+    await mgr.end();
+    expect(await platform.getItem('scout.session.history')).toBeNull();
+    expect(await make(platform).sessionAt(T0)).toBeNull();
+  });
+
+  it('does not overwrite the stored history after a failed read', async () => {
+    const platform = memoryPlatform();
+    const a = make(platform);
+    await a.start();
+    const stored = await platform.getItem('scout.session.history');
+    const flaky = {
+      ...platform,
+      getItem: async (k: string) => {
+        if (k === 'scout.session.history') throw new Error('storage unavailable');
+        return platform.getItem(k);
+      },
+    };
+    vi.setSystemTime(new Date(T0 + 3 * 60 * MIN));
+    const b = make(flaky);
+    await b.start();
+    expect(await platform.getItem('scout.session.history')).toBe(stored);
+  });
+
   it('records activity at most once a minute', async () => {
     const platform = memoryPlatform();
     const writes = vi.spyOn(platform, 'setItem');
@@ -237,17 +264,36 @@ describe('session history', () => {
 
 describe('sessionAt', () => {
   const MIN = 60_000;
+  const IDLE = 30 * MIN;
+  it('finds a session that was idle on one screen but not yet timed out', () => {
+    // Last span at 0, crash 5 minutes later: the session was still live.
+    expect(sessionAt([{ id: 'a', s: -60 * MIN, e: 0 }], 5 * MIN, IDLE)?.id).toBe('a');
+    expect(sessionAt([{ id: 'a', s: -60 * MIN, e: 0 }], 31 * MIN, IDLE)).toBeNull();
+  });
+
+  it('prefers the session running at the crash over one that started just after it', () => {
+    // a rotated to b at 60 min (max duration); the crash was at 59 min.
+    const history = [
+      { id: 'a', s: 0, e: 60 * MIN },
+      { id: 'b', s: 60 * MIN, e: 90 * MIN },
+    ];
+    expect(sessionAt(history, 59 * MIN, IDLE)?.id).toBe('a');
+    expect(sessionAt(history, 61 * MIN, IDLE)?.id).toBe('b');
+  });
+
   it('picks the latest session started by then', () => {
     const history = [
       { id: 'a', s: 0, e: 100 * MIN },
       { id: 'b', s: 50 * MIN, e: 100 * MIN },
     ];
-    expect(sessionAt(history, 60 * MIN)?.id).toBe('b');
-    expect(sessionAt(history, 10 * MIN)?.id).toBe('a');
+    expect(sessionAt(history, 60 * MIN, IDLE)?.id).toBe('b');
+    expect(sessionAt(history, 10 * MIN, IDLE)?.id).toBe('a');
   });
 
   it('allows a window start rounded down to the minute', () => {
     // Started 30 s into the minute the window starts at.
-    expect(sessionAt([{ id: 'a', s: 30_000, e: 5 * MIN }], 0)?.id).toBe('a');
+    expect(sessionAt([{ id: 'a', s: 30_000, e: 5 * MIN }], 0, IDLE)?.id).toBe('a');
+    // Not when it started more than a minute after the window start.
+    expect(sessionAt([{ id: 'a', s: 61_000, e: 5 * MIN }], 0, IDLE)).toBeNull();
   });
 });

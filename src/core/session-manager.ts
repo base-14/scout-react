@@ -11,8 +11,8 @@ const HISTORY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const HISTORY_MAX = 30;
 /** `lastActiveAt` is written to the history at most this often. */
 const HISTORY_ACTIVE_STEP_MS = 60_000;
-/** Covers the throttled `lastActiveAt` and a time rounded down to the minute. */
-const HISTORY_MATCH_SLACK_MS = 2 * HISTORY_ACTIVE_STEP_MS;
+/** A MetricKit window start is the event time rounded down to the minute. */
+const WINDOW_ROUNDING_MS = 60_000;
 
 /** A session as recorded in the history: id, start and last activity (epoch ms). */
 export interface SessionRecord {
@@ -22,17 +22,29 @@ export interface SessionRecord {
 }
 
 /**
- * The session that was running at `t`: the latest one started by then (within
- * the slack) and still active then. `null` when no recorded session covers it,
- * e.g. a launch killed before the SDK started.
+ * The session that was running at `t`: the latest one started by then that
+ * hadn't yet gone idle for `idleMs` (the session timeout; a session stays live
+ * that long without activity). Failing that, one started within a minute
+ * after `t`, since `t` may be rounded down to the minute. `null` when no
+ * recorded session covers it, e.g. a launch killed before the SDK started.
  */
-export function sessionAt(history: SessionRecord[], t: number): SessionRecord | null {
-  let best: SessionRecord | null = null;
+export function sessionAt(
+  history: SessionRecord[],
+  t: number,
+  idleMs: number,
+): SessionRecord | null {
+  const live = (r: SessionRecord) => t <= r.e + Math.max(idleMs, HISTORY_ACTIVE_STEP_MS);
+  let running: SessionRecord | null = null;
+  let justAfter: SessionRecord | null = null;
   for (const r of history) {
-    if (r.s > t + HISTORY_MATCH_SLACK_MS || t > r.e + HISTORY_MATCH_SLACK_MS) continue;
-    if (!best || r.s > best.s) best = r;
+    if (!live(r)) continue;
+    if (r.s <= t) {
+      if (!running || r.s > running.s) running = r;
+    } else if (r.s <= t + WINDOW_ROUNDING_MS) {
+      if (!justAfter || r.s < justAfter.s) justAfter = r;
+    }
   }
-  return best;
+  return running ?? justAfter;
 }
 /** Where a session's `sampled` decision came from. */
 export type SamplingSource = 'user' | 'fallback';
@@ -261,6 +273,9 @@ export class SessionManager {
     const hadSession = this.current !== null;
     this.suspend();
     if (hadSession) await safe(() => this.platform.removeItem(STORAGE_KEY));
+    // The history names sessions too; ending RUM forgets it as well.
+    this.history = null;
+    await safe(() => this.platform.removeItem(HISTORY_KEY));
   }
   /**
    * Leaves the disabled state with a fresh session, its sampling decided like
@@ -272,14 +287,20 @@ export class SessionManager {
   }
   /** The recorded session that was running at `t` (epoch ms), if any. */
   async sessionAt(t: number): Promise<SessionRecord | null> {
-    return sessionAt(await this.loadHistory(), t);
+    return sessionAt((await this.loadHistory()) ?? [], t, this.timeoutMs);
   }
 
   private history: SessionRecord[] | null = null;
 
-  private async loadHistory(): Promise<SessionRecord[]> {
+  /** `null` when storage couldn't be read: nothing is cached, so nothing is overwritten. */
+  private async loadHistory(): Promise<SessionRecord[] | null> {
     if (this.history) return this.history;
-    const raw = await safe(() => this.platform.getItem(HISTORY_KEY));
+    let raw: string | null;
+    try {
+      raw = await this.platform.getItem(HISTORY_KEY);
+    } catch {
+      return null;
+    }
     let parsed: unknown = [];
     try {
       parsed = raw ? JSON.parse(raw) : [];
@@ -304,6 +325,8 @@ export class SessionManager {
    */
   private async recordHistory(cur: PersistedSession): Promise<void> {
     const history = await this.loadHistory();
+    // Unreadable storage, or RUM turned off while this write was pending.
+    if (!history || this.suspended) return;
     const entry = history.find((r) => r.id === cur.id);
     if (entry) {
       if (cur.lastActiveAt - entry.e < HISTORY_ACTIVE_STEP_MS) return;
