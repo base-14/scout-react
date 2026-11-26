@@ -122,6 +122,40 @@ describe('iOS MetricKit crashes', () => {
       expect(crashSpans().map(typeOf)).toEqual(['kscrash']);
     });
 
+    it('matches real report pairs: the window starts 0–59 s before the in-app crash', async () => {
+      // Offsets (in-app crash time minus MetricKit window start) and signals
+      // from 12 real production pairs: iOS rounds the window down to the
+      // minute, or reports the exact second. The window is a single instant.
+      const pairs: Array<[number, string, string, string]> = [
+        [0, 'SIGSEGV', '11', '1'],
+        [0, 'SIGABRT', '6', '10'],
+        [16, 'SIGBUS', '10', '1'],
+        [5, 'SIGBUS', '10', '1'],
+        [10, 'SIGBUS', '10', '1'],
+        [7, 'SIGBUS', '10', '1'],
+        [42, 'SIGBUS', '10', '1'],
+        [26, 'SIGBUS', '10', '1'],
+        [3, 'SIGBUS', '10', '1'],
+        [19, 'SIGBUS', '10', '1'],
+        [34, 'SIGBUS', '10', '1'],
+        [12, 'SIGABRT', '6', '10'],
+      ];
+      const reports: Report[] = [];
+      pairs.forEach(([offsetS, inAppSignal, signal, exceptionType], i) => {
+        const windowStart = Date.now() - (i + 1) * 2 * HOUR;
+        reports.push({
+          ...kscrash(windowStart + offsetS * 1000),
+          'crash.signal': inAppSignal,
+        });
+        reports.push(metricKitCrash(windowStart, windowStart, { signal, exceptionType }));
+      });
+      const s = await makeScout();
+      await installNativeCrashReader(s, fakeCrashModule(reports));
+      const spans = crashSpans();
+      expect(spans).toHaveLength(pairs.length);
+      expect(spans.filter((x) => typeOf(x) === 'metric_kit_crash')).toHaveLength(0);
+    });
+
     it('a MetricKit copy delivered on a later launch is still dropped', async () => {
       const platform = memoryPlatform();
       const crashAt = Date.now() - 2 * HOUR;
