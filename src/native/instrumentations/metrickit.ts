@@ -92,7 +92,7 @@ function signalNumber(v: unknown): number | null {
 
 // Every writer in ios/ stores ISO 8601 strings with a zone; numbers are
 // taken as epoch milliseconds.
-function toMs(v: unknown): number | null {
+export function toMs(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v !== 'string' || v === '') return null;
   const numeric = Number(v);
