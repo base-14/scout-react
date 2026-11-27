@@ -98,13 +98,12 @@ export async function installNativeCrashReader(
       const crash = isInProcessCrash(report) ? asInProcessCrash(report) : null;
       if (crash) recentInProcess.push(crash);
     }
-    const duplicates = findDuplicates(
-      recentInProcess,
-      reports.filter((r) => !scout.crashHappenedWhileDisabled(r)),
-    );
+    const enabledReports = reports.filter((r) => !scout.crashHappenedWhileDisabled(r));
+    const duplicates = findDuplicates(recentInProcess, enabledReports);
     // Android: the OS's exit-info record of a death the in-process handlers
     // already reported. Recorded the same way, for a record that arrives on a
-    // later launch.
+    // later launch, and also before the disabled-period check: the OS copy of
+    // a crash dropped because RUM was off is dropped too.
     const recentAndroid: Array<AndroidCrash & { report?: Record<string, unknown> }> =
       await loadRecentAndroidCrashes(scout.platformAdapter);
     for (const report of reports) {
@@ -115,7 +114,7 @@ export async function installNativeCrashReader(
     for (const exit of findExitInfoDuplicates(
       recentAndroid,
       seenExitRecords,
-      reports.filter((r) => !scout.crashHappenedWhileDisabled(r)),
+      enabledReports,
     )) {
       duplicates.add(exit);
     }

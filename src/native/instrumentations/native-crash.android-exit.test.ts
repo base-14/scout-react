@@ -5,6 +5,12 @@ import { ATTR } from '../../core/attributes';
 import { SPAN } from '../../core/spans';
 import { makeRecorder, memoryPlatform, type Recorder } from '../../test/recorder';
 import { installNativeCrashReader } from './native-crash';
+import {
+  findExitInfoDuplicates,
+  loadRecentAndroidCrashes,
+  loadSeenExitRecords,
+  saveAndroidState,
+} from './android-exit';
 
 type Platform = ReturnType<typeof memoryPlatform>;
 type Report = Record<string, unknown>;
@@ -242,6 +248,18 @@ describe('Android: exit-info records of crashes already reported in-process', ()
     expect(rec.spans().filter((x) => x.name === SPAN.APP_EXIT)).toHaveLength(1);
   });
 
+  it('drops the OS record of a crash that happened while RUM was disabled', async () => {
+    // The in-process crash is dropped as disabled, and so is its exit-info copy.
+    const s = await makeScout();
+    const inApp = ndk(t0, 950);
+    vi.spyOn(s, 'crashHappenedWhileDisabled').mockImplementation((r) => r === inApp);
+    await installNativeCrashReader(
+      s,
+      fakeCrashModule([inApp, exitRecord('native_crash', 950, t0 + 800)]),
+    );
+    expect(crashSpans()).toHaveLength(0);
+  });
+
   it('leaves iOS reports untouched', async () => {
     const s = await makeScout();
     await installNativeCrashReader(
@@ -256,5 +274,70 @@ describe('Android: exit-info records of crashes already reported in-process', ()
       ]),
     );
     expect(crashSpans()).toHaveLength(1);
+  });
+});
+
+describe('Android exit-info matching rules', () => {
+  const t0 = Date.parse('2026-01-01T00:00:00Z');
+
+  it('prefers the in-process crash with the same pid over a closer one without a pid', () => {
+    const recent = [
+      { t: t0 + 900, p: null, k: 'uncaught_exception' },
+      { t: t0, p: 4242, k: 'uncaught_exception' },
+    ];
+    const exit = exitRecord('jvm_crash', 4242, t0 + 1000);
+    expect(findExitInfoDuplicates(recent, new Set(), [exit]).has(exit)).toBe(true);
+    // The pid match was absorbed; the closer one without a pid is left.
+    expect(recent).toEqual([{ t: t0 + 900, p: null, k: 'uncaught_exception' }]);
+  });
+
+  it('keeps 7 days and at most 50 entries, and reads them back', async () => {
+    const platform = memoryPlatform();
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const recent = [
+      { t: now - 8 * DAY, p: 1, k: 'ndk_signal' },
+      ...Array.from({ length: 60 }, (_, i) => ({
+        t: now - i * 1000,
+        p: 100 + i,
+        k: 'ndk_signal',
+      })),
+    ];
+    const seen = new Set([
+      `7:${now - 8 * DAY}`,
+      ...Array.from({ length: 60 }, (_, i) => `${200 + i}:${now - i * 1000}`),
+    ]);
+    await saveAndroidState(platform, recent, seen);
+    const kept = await loadRecentAndroidCrashes(platform);
+    expect(kept).toHaveLength(50);
+    expect(kept.some((c) => c.p === 1)).toBe(false);
+    // The newest 50 survive.
+    expect(Math.max(...kept.map((c) => c.p ?? 0))).toBe(149);
+    expect(Math.min(...kept.map((c) => c.p ?? 0))).toBe(100);
+    const seenBack = await loadSeenExitRecords(platform);
+    expect(seenBack.size).toBe(50);
+    expect(seenBack.has(`7:${now - 8 * DAY}`)).toBe(false);
+    expect(seenBack.has(`200:${now}`)).toBe(true);
+  });
+
+  it('ignores stored entries with a malformed pid', async () => {
+    const platform = memoryPlatform();
+    await platform.setItem(
+      'scout.android.in_process_crashes',
+      JSON.stringify([
+        { t: 1, p: 'x', k: 'ndk_signal' },
+        { t: 2, p: null, k: 'ndk_signal' },
+        { t: 3, p: 7, k: 'ndk_signal' },
+      ]),
+    );
+    expect((await loadRecentAndroidCrashes(platform)).map((c) => c.t)).toEqual([2, 3]);
+  });
+
+  it('does not treat inherited object keys as crash types', () => {
+    const odd = { ...exitRecord('jvm_crash', 1, t0), 'crash.type': 'toString' };
+    expect(
+      findExitInfoDuplicates([{ t: t0, p: 1, k: 'uncaught_exception' }], new Set(), [odd])
+        .size,
+    ).toBe(0);
   });
 });

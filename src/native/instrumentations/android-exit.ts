@@ -12,11 +12,11 @@ import { toMs } from './metrickit';
 export const EXIT_INFO_SOURCE = 'exit_info';
 
 /** In-process crash type each exit-info crash type duplicates. */
-const IN_PROCESS_TYPE_OF: Record<string, string> = {
-  native_crash: 'ndk_signal',
-  jvm_crash: 'uncaught_exception',
-};
-const IN_PROCESS_TYPES = new Set(Object.values(IN_PROCESS_TYPE_OF));
+const IN_PROCESS_TYPE_OF = new Map<string, string>([
+  ['native_crash', 'ndk_signal'],
+  ['jvm_crash', 'uncaught_exception'],
+]);
+const IN_PROCESS_TYPES = new Set(IN_PROCESS_TYPE_OF.values());
 
 const RECENT_KEY = 'scout.android.in_process_crashes';
 const SEEN_KEY = 'scout.android.exit_records';
@@ -24,10 +24,15 @@ const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_KEPT = 50;
 /**
  * The OS records the death after the handler wrote its report: 0–3.2 s later
- * in production data. The NDK handler writes whole seconds, hence the slack
- * before.
+ * in production data. The NDK handler's whole-second timestamp only widens
+ * that gap.
  */
 const DEATH_AFTER_MS = 10_000;
+/**
+ * A death recorded before the in-process report's time can only come from
+ * the two clocks disagreeing, or from an exit record without
+ * death_timestamp_ms falling back to its whole-second crash.timestamp.
+ */
 const DEATH_BEFORE_MS = 2_000;
 
 /** An in-process crash: time, pid (null when the report has none) and type. */
@@ -41,7 +46,7 @@ export interface AndroidCrash {
 export function isExitInfoCrash(report: Record<string, unknown>): boolean {
   return (
     report['crash.source'] === EXIT_INFO_SOURCE &&
-    String(report['crash.type']) in IN_PROCESS_TYPE_OF &&
+    IN_PROCESS_TYPE_OF.has(String(report['crash.type'])) &&
     report['scout.span'] === undefined
   );
 }
@@ -92,7 +97,7 @@ export function findExitInfoDuplicates(
     if (key !== null) seen.add(key);
     const death = deathOf(exit);
     if (death === null) continue;
-    const kind = IN_PROCESS_TYPE_OF[String(exit['crash.type'])];
+    const kind = IN_PROCESS_TYPE_OF.get(String(exit['crash.type']));
     const pid = pidOf(exit);
     let best = -1;
     recent.forEach((c, i) => {
@@ -141,7 +146,8 @@ export function loadRecentAndroidCrashes(
     RECENT_KEY,
     (c): c is AndroidCrash =>
       typeof (c as AndroidCrash)?.t === 'number' &&
-      typeof (c as AndroidCrash)?.k === 'string',
+      typeof (c as AndroidCrash)?.k === 'string' &&
+      ((c as AndroidCrash).p === null || Number.isInteger((c as AndroidCrash).p)),
   );
 }
 
@@ -157,6 +163,12 @@ export async function loadSeenExitRecords(
   return new Set(entries.map(([key]) => key));
 }
 
+/**
+ * Failures are not raised on purpose: an error here would skip
+ * clearPendingCrashes and re-send every report of this drain on the next
+ * launch, while lost state can at worst let one re-delivered exit record
+ * through.
+ */
 export async function saveAndroidState(
   platform: PlatformAdapter,
   recent: AndroidCrash[],
