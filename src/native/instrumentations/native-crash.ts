@@ -18,6 +18,14 @@ import {
   payloadWindow,
   saveRecentInProcessCrashes,
 } from './metrickit';
+import {
+  asAndroidCrash,
+  findExitInfoDuplicates,
+  loadRecentAndroidCrashes,
+  loadSeenExitRecords,
+  saveAndroidState,
+  type AndroidCrash,
+} from './android-exit';
 
 /**
  * Key the Android exit-info collector sets on a pending report that must be
@@ -90,10 +98,26 @@ export async function installNativeCrashReader(
       const crash = isInProcessCrash(report) ? asInProcessCrash(report) : null;
       if (crash) recentInProcess.push(crash);
     }
-    const duplicates = findDuplicates(
-      recentInProcess,
-      reports.filter((r) => !scout.crashHappenedWhileDisabled(r)),
-    );
+    const enabledReports = reports.filter((r) => !scout.crashHappenedWhileDisabled(r));
+    const duplicates = findDuplicates(recentInProcess, enabledReports);
+    // Android: the OS's exit-info record of a death the in-process handlers
+    // already reported. Recorded the same way, for a record that arrives on a
+    // later launch, and also before the disabled-period check: the OS copy of
+    // a crash dropped because RUM was off is dropped too.
+    const recentAndroid: Array<AndroidCrash & { report?: Record<string, unknown> }> =
+      await loadRecentAndroidCrashes(scout.platformAdapter);
+    for (const report of reports) {
+      const crash = asAndroidCrash(report);
+      if (crash) recentAndroid.push({ ...crash, report });
+    }
+    const seenExitRecords = await loadSeenExitRecords(scout.platformAdapter);
+    for (const exit of findExitInfoDuplicates(
+      recentAndroid,
+      seenExitRecords,
+      enabledReports,
+    )) {
+      duplicates.add(exit);
+    }
     for (const report of reports) {
       // Persisted by the native handlers while RUM was disabled: dropped (and
       // cleared below with the rest), never replayed.
@@ -224,6 +248,7 @@ export async function installNativeCrashReader(
     // Save before clearing: if anything above throws, the reports stay pending
     // and the next drain records them again.
     await saveRecentInProcessCrashes(scout.platformAdapter, recentInProcess);
+    await saveAndroidState(scout.platformAdapter, recentAndroid, seenExitRecords);
     await ScoutCrash.clearPendingCrashes();
   } catch {}
 }

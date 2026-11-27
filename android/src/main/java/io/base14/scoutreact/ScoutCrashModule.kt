@@ -654,6 +654,8 @@ private object ScoutCrashInstaller {
       put("crash.nsexception_name", throwable.javaClass.name)
       put("crash.stack_trace", sw.toString())
       put("crash.thread", thread.name ?: "unknown")
+      // Lets the JS side match the OS exit-info record of this death.
+      put("crash.pid", android.os.Process.myPid())
       put("crash.timestamp", System.currentTimeMillis().toString())
     }
     val out = File(dir, "java_${System.currentTimeMillis()}_${Thread.currentThread().id}.json")

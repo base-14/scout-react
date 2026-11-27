@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Android: a crash the SDK caught is no longer counted again from exit
+  info.** On the next launch, Android's `ApplicationExitInfo` record of the
+  same death was reported as a second crash (`native_crash` / `jvm_crash`
+  with `crash.source=exit_info`) next to the in-process report (`ndk_signal`
+  / `uncaught_exception`), in the same session. Such a record is now dropped
+  when an in-process crash of the same kind, from the same process where both
+  name one, happened up to 10 seconds before the recorded death; its OS
+  tombstone (`crash.tombstone`) moves onto the in-process crash. Exit-info
+  crashes with no in-process report are still reported. An exit record
+  delivered again on a later launch is reported once. JVM crash reports now
+  carry `crash.pid`. If the app is reopened before Android has recorded the
+  exit, the record arrives a launch later: it is still dropped, but its
+  tombstone can no longer be attached to the crash already sent.
+
 ## [0.1.26] - 2026-11-27
 
 ### Fixed

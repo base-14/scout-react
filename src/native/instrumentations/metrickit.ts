@@ -90,9 +90,10 @@ function signalNumber(v: unknown): number | null {
   return SIGNAL_NUMBERS[v.toUpperCase()] ?? null;
 }
 
-// Every writer in ios/ stores ISO 8601 strings with a zone; numbers are
-// taken as epoch milliseconds.
-function toMs(v: unknown): number | null {
+// ISO 8601 strings with a zone (the ios/ writers, the NDK handler, exit
+// info) or epoch milliseconds, as a number or a numeric string (the Android
+// JVM writer).
+export function toMs(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v !== 'string' || v === '') return null;
   const numeric = Number(v);
