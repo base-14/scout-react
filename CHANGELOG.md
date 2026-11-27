@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tombstone (`crash.tombstone`) moves onto the in-process crash. Exit-info
   crashes with no in-process report are still reported. An exit record
   delivered again on a later launch is reported once. JVM crash reports now
-  carry `crash.pid`.
+  carry `crash.pid`. If the app is reopened before Android has recorded the
+  exit, the record arrives a launch later: it is still dropped, but its
+  tombstone can no longer be attached to the crash already sent.
 
 ## [0.1.26] - 2026-11-27
 
